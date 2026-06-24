@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Cam Pre-Viz Director Engine</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <div class="sidebar">
+            <h2>Pre-Viz Setup</h2>
+
+            <div class="control-group">
+                <label for="camera-select">Active Camera:</label>
+                <select id="camera-select"></select>
+            </div>
+
+            <div class="control-group">
+                <div class="slider-header">
+                    <label for="focal-slider">Focal Length:</label>
+                    <span id="focal-val">50mm</span>
+                </div>
+                <input type="range" id="focal-slider" step="1">
+            </div>
+
+            <div class="control-group button-group">
+                <button id="btn-add-actor" class="btn">Add Actor (1.8m)</button>
+                <button id="btn-add-table" class="btn">Add Table & Flowers</button>
+                <button id="btn-add-bookcase" class="btn">Add Bookcase</button>
+            </div>
+
+            <div class="instructions">
+                <h3>Controls:</h3>
+                <ul>
+                    <li>Drag items on the <strong>Floor Plan</strong> to rearrange the stage.</li>
+                    <li>Sweep the focal slider to test Max/Min shots.</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="workspace">
+            <div class="canvas-panel">
+                <h3>1. Live Floor Plan (Bird's Eye View)</h3>
+                <canvas id="floorplan-canvas" width="600" height="400"></canvas>
+            </div>
+
+            <div class="canvas-panel">
+                <h3>2. Director's Viewfinder (16:9 POV)</h3>
+                <canvas id="viewfinder-canvas" width="640" height="360"></canvas>
+                <div id="shot-hud" class="hud-overlay">
+                    <div id="hud-cam">CAM 5</div>
+                    <div id="hud-lens">100mm</div>
+                    <div id="hud-scale">Shot: --</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>
