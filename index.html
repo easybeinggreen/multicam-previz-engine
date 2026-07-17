@@ -63,6 +63,11 @@
         <label class="field-label" for="actorsel">Actor</label>
         <select id="actorsel"></select>
         <div class="row-label" style="margin-top:8px">
+          <label class="field-label" for="standat">Stand at</label>
+        </div>
+        <select id="standat"></select>
+        <div class="hint">Sets a starting mark — still freely draggable after</div>
+        <div class="row-label" style="margin-top:8px">
           <label class="field-label" for="faces">Facing</label>
           <span id="facev" class="value-badge">100°</span>
         </div>
@@ -91,7 +96,7 @@
     <main class="stage">
       <div class="view-block">
         <div class="view-caption">Floor plan — red marker is origin (0,0,0) at the base of Vignette 3. Scroll to zoom, drag empty space to pan.</div>
-        <canvas id="fp" width="640" height="420"></canvas>
+        <canvas id="fp" width="640" height="560"></canvas>
       </div>
       <div class="view-block">
         <div class="view-caption">Director's viewfinder (16:9)</div>
