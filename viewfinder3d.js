@@ -95,7 +95,7 @@ async function init3D() {
       const model = gltf.scene;
       
       // Scale Brian down
-      const scaleFactor = 0.015;
+      const scaleFactor = 1.5;
       model.scale.set(scaleFactor, scaleFactor, scaleFactor);
       
       // Calculate bounding box to position feet on ground
