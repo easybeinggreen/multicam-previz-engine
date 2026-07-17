@@ -170,17 +170,19 @@ async function init3D() {
   };
 
   // Initialisation succeeded — enable the toggle and switch to 3D by default
-  toggle.disabled = false;
-  toggle.checked = true;
-  toggle.onchange();
-  canvas2d.style.display = 'none';
-  canvas3d.style.display = 'block';
+  // Define the onchange handler first
   toggle.onchange = () => {
     const use3d = toggle.checked;
     canvas2d.style.display = use3d ? 'none' : 'block';
     canvas3d.style.display = use3d ? 'block' : 'none';
+    if (use3d) {
+      window.Previz3DRender();
+    }
   };
-  window.Previz3DRender();
+
+  toggle.disabled = false;
+  toggle.checked = true;
+  toggle.onchange();  // Trigger the change to show 3D
 }
 
 // Module scripts execute after deferred/classic scripts have already run, so
