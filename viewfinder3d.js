@@ -1,8 +1,7 @@
 // ===== Progressive-enhancement 3D viewfinder =====
-// Uses importmap to load three.js and GLTFLoader properly
+// Uses importmap to load three.js (no GLTFLoader needed)
 
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 function worldToThree(x, y, z) { 
   return new THREE.Vector3(x, z, -y); 
@@ -82,192 +81,148 @@ async function init3D() {
     scene.add(mesh);
   });
 
-  // --- Load Brian model (alabaster) ---
-  async function loadBrianModel() {
-    const loader = new GLTFLoader();
-    const url = './brian.glb';
-    
-    try {
-      const gltf = await new Promise((resolve, reject) => {
-        loader.load(url, resolve, undefined, reject);
-      });
-      
-      const model = gltf.scene;
-      
-      // Scale Brian — adjust this to get the right size
-      const scaleFactor = 0.017;
-      model.scale.set(scaleFactor, scaleFactor, scaleFactor);
-      
-      // Calculate bounding box to position feet on ground
-      const box = new THREE.Box3().setFromObject(model);
-      const center = box.getCenter(new THREE.Vector3());
-      const size = box.getSize(new THREE.Vector3());
-      
-      // Move so feet are at y=0 (relative to the model's local origin)
-      model.position.y = -center.y + (size.y / 2);
-      
-      console.log('✅ Brian loaded!');
-      console.log('Brian size (meters):', size.x * scaleFactor, size.y * scaleFactor, size.z * scaleFactor);
-      
-      // Apply alabaster material
-      const alabasterMat = new THREE.MeshStandardMaterial({
-        color: 0xf5f0eb,
-        roughness: 0.4,
-        metalness: 0.0,
-        emissive: new THREE.Color(0x222222),
-        emissiveIntensity: 0.05,
-        transparent: true,
-        opacity: 0.98,
-      });
-      
-      model.traverse((child) => {
-        if (child.isMesh) {
-          child.material = alabasterMat.clone();
-          child.castShadow = true;
-          child.receiveShadow = true;
-        }
-      });
-      
-      // --- Fix T-pose: rotate arms down ---
-      // Try to find arm bones and rotate them
-      model.traverse((child) => {
-        if (child.isBone) {
-          // Look for arm bones
-          const name = child.name.toLowerCase();
-          if (name.includes('arm') || name.includes('shoulder') || name.includes('upperarm')) {
-            // Rotate arms down slightly
-            if (name.includes('left')) {
-              child.rotation.z = 0.3;
-            } else if (name.includes('right')) {
-              child.rotation.z = -0.3;
-            }
-          }
-        }
-      });
-      
-      return model;
-    } catch (err) {
-      console.error('Failed to load Brian model:', err);
-      return null;
-    }
-  }
-
-  // --- Build a detailed humanoid mannequin (fallback) ---
-  function buildFallbackMannequin(it) {
+  // --- Build a HUMAN-LOOKING mannequin from primitives ---
+  function buildHumanMannequin(it) {
     const group = new THREE.Group();
     const h = it.h;
     const w = it.w;
     
+    // Alabaster material
     const alabasterMat = new THREE.MeshStandardMaterial({
       color: 0xf5f0eb,
       roughness: 0.3,
       metalness: 0.0,
     });
     
+    // Slightly warmer for skin areas
     const skinMat = new THREE.MeshStandardMaterial({
       color: 0xf0e4d8,
       roughness: 0.4,
       metalness: 0.0,
     });
     
-    // Head
-    const headR = h * 0.065;
-    const head = new THREE.Mesh(new THREE.SphereGeometry(headR, 16, 12), skinMat);
+    // --- Torso ---
+    const torso = new THREE.Mesh(
+      new THREE.CylinderGeometry(w * 0.35, w * 0.25, h * 0.4, 10),
+      alabasterMat
+    );
+    torso.position.y = h * 0.55;
+    torso.castShadow = true;
+    group.add(torso);
+    
+    // --- Chest (subtle definition) ---
+    const chest = new THREE.Mesh(
+      new THREE.SphereGeometry(w * 0.28, 8, 8),
+      alabasterMat
+    );
+    chest.position.set(0, h * 0.62, w * 0.05);
+    chest.scale.set(1, 0.6, 0.3);
+    group.add(chest);
+    
+    // --- Neck ---
+    const neck = new THREE.Mesh(
+      new THREE.CylinderGeometry(w * 0.1, w * 0.13, h * 0.06, 8),
+      skinMat
+    );
+    neck.position.y = h * 0.78;
+    group.add(neck);
+    
+    // --- Head ---
+    const headR = h * 0.07;
+    const head = new THREE.Mesh(
+      new THREE.SphereGeometry(headR, 16, 14),
+      skinMat
+    );
     head.position.y = h * 0.92;
     head.castShadow = true;
     group.add(head);
     
-    // Neck
-    const neck = new THREE.Mesh(
-      new THREE.CylinderGeometry(headR * 0.5, headR * 0.6, h * 0.05, 8),
+    // --- Nose (small bump) ---
+    const nose = new THREE.Mesh(
+      new THREE.SphereGeometry(headR * 0.12, 6, 6),
       skinMat
     );
-    neck.position.y = h * 0.82;
-    group.add(neck);
+    nose.position.set(0, h * 0.91, -headR * 0.9);
+    group.add(nose);
     
-    // Torso
-    const torso = new THREE.Mesh(
-      new THREE.CylinderGeometry(w * 0.38, w * 0.28, h * 0.38, 10),
-      alabasterMat
-    );
-    torso.position.y = h * 0.58;
-    torso.castShadow = true;
-    group.add(torso);
-    
-    // Shoulders
+    // --- Shoulders ---
     const shoulder = new THREE.Mesh(
-      new THREE.BoxGeometry(w * 0.7, h * 0.04, w * 0.2),
+      new THREE.BoxGeometry(w * 0.65, h * 0.04, w * 0.2),
       alabasterMat
     );
-    shoulder.position.set(0, h * 0.78, 0);
+    shoulder.position.set(0, h * 0.76, 0);
     group.add(shoulder);
     
-    // Arms (relaxed, not T-pose)
-    const armH = h * 0.3;
-    const armR = w * 0.065;
+    // --- Arms (relaxed at sides) ---
+    const armH = h * 0.32;
+    const armR = w * 0.055;
     [-1, 1].forEach(side => {
+      // Upper arm
       const arm = new THREE.Mesh(
-        new THREE.CylinderGeometry(armR, armR * 0.7, armH, 8),
+        new THREE.CylinderGeometry(armR, armR * 0.8, armH, 8),
         skinMat
       );
-      arm.position.set(side * (w * 0.4), h * 0.6, 0);
-      arm.rotation.z = side * 0.4;  // Arms down at sides
-      arm.rotation.x = -0.1;
+      arm.position.set(side * (w * 0.42), h * 0.62, 0);
+      arm.rotation.z = side * 0.25;
+      arm.rotation.x = -0.05;
       arm.castShadow = true;
       group.add(arm);
       
-      // Forearms (hanging down)
+      // Forearm
       const foreArm = new THREE.Mesh(
-        new THREE.CylinderGeometry(armR * 0.7, armR * 0.5, armH * 0.7, 8),
+        new THREE.CylinderGeometry(armR * 0.8, armR * 0.6, armH * 0.7, 8),
         skinMat
       );
-      foreArm.position.set(side * (w * 0.38), h * 0.38, 0);
-      foreArm.rotation.z = side * 0.3;
+      foreArm.position.set(side * (w * 0.44), h * 0.42, 0);
+      foreArm.rotation.z = side * 0.15;
       foreArm.castShadow = true;
       group.add(foreArm);
       
-      // Hands
+      // Hand
       const hand = new THREE.Mesh(
-        new THREE.SphereGeometry(armR * 0.8, 6, 6),
+        new THREE.SphereGeometry(armR * 0.7, 6, 6),
         skinMat
       );
-      hand.position.set(side * (w * 0.38), h * 0.3, 0);
+      hand.position.set(side * (w * 0.45), h * 0.34, 0);
       group.add(hand);
     });
     
-    // Pelvis
+    // --- Pelvis ---
     const pelvis = new THREE.Mesh(
-      new THREE.CylinderGeometry(w * 0.3, w * 0.35, h * 0.06, 8),
+      new THREE.CylinderGeometry(w * 0.3, w * 0.32, h * 0.05, 8),
       alabasterMat
     );
     pelvis.position.set(0, h * 0.38, 0);
     group.add(pelvis);
     
-    // Legs
-    const legH = h * 0.3;
-    const legR = w * 0.1;
+    // --- Legs ---
+    const legH = h * 0.32;
+    const legR = w * 0.085;
     [-1, 1].forEach(side => {
+      // Upper leg
       const leg = new THREE.Mesh(
-        new THREE.CylinderGeometry(legR, legR * 0.8, legH, 8),
+        new THREE.CylinderGeometry(legR, legR * 0.85, legH, 8),
         alabasterMat
       );
-      leg.position.set(side * (w * 0.16), h * 0.25, 0);
+      leg.position.set(side * (w * 0.16), h * 0.22, 0);
       leg.castShadow = true;
       group.add(leg);
       
+      // Lower leg
       const lowerLeg = new THREE.Mesh(
-        new THREE.CylinderGeometry(legR * 0.8, legR * 0.6, legH * 0.85, 8),
+        new THREE.CylinderGeometry(legR * 0.85, legR * 0.7, legH * 0.8, 8),
         alabasterMat
       );
-      lowerLeg.position.set(side * (w * 0.16), h * 0.08, 0);
+      lowerLeg.position.set(side * (w * 0.16), h * 0.07, 0);
       lowerLeg.castShadow = true;
       group.add(lowerLeg);
       
+      // Foot
       const foot = new THREE.Mesh(
-        new THREE.BoxGeometry(legR * 1.2, h * 0.03, legR * 2.0),
+        new THREE.BoxGeometry(legR * 1.1, h * 0.03, legR * 1.8),
         alabasterMat
       );
-      foot.position.set(side * (w * 0.16), 0.015, legR * 0.3);
+      foot.position.set(side * (w * 0.16), 0.015, legR * 0.2);
       foot.castShadow = true;
       group.add(foot);
     });
@@ -277,18 +232,6 @@ async function init3D() {
 
   const actorMeshes = new Map();
   const propMeshes = new Map();
-  let brianModel = null;
-
-  // Try to load Brian once at startup
-  loadBrianModel().then(model => {
-    if (model) {
-      brianModel = model;
-      console.log('✅ Brian ready for use!');
-      if (window.Previz3DRender) window.Previz3DRender();
-    } else {
-      console.warn('⚠️ Brian failed to load — using fallback mannequin');
-    }
-  });
 
   function syncItems() {
     const liveIds = new Set(state.items.map(i => i.id));
@@ -299,17 +242,12 @@ async function init3D() {
       if (it.type === 'actor') {
         let g = actorMeshes.get(it.id);
         if (!g) {
-          if (brianModel) {
-            // Clone Brian for each actor
-            g = brianModel.clone();
-          } else {
-            g = buildFallbackMannequin(it);
-          }
+          g = buildHumanMannequin(it);
           scene.add(g);
           actorMeshes.set(it.id, g);
         }
         
-        // Position at the actor's location (NOT at 0,0,0)
+        // Position at the actor's location
         const pos = worldToThree(it.x, it.y, 0);
         g.position.copy(pos);
         
