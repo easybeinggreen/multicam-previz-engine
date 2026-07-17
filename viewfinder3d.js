@@ -93,7 +93,7 @@ async function init3D() {
       });
       
       const model = gltf.scene;
-      model.scale.set(0.8, 0.8, 0.8);
+      model.scale.set(0.02, 0.02, 0.02);
       
       // Apply alabaster material
       const alabasterMat = new THREE.MeshStandardMaterial({
