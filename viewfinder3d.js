@@ -178,7 +178,7 @@ async function init3D() {
         if (g) {
           const pos = worldToThree(it.x, it.y, 0);
           g.position.copy(pos);
-          
+          console.log('[sync]', it.id, 'data:', it.x.toFixed(2), it.y.toFixed(2), '→ mesh:', g.position.x.toFixed(2), g.position.y.toFixed(2), g.position.z.toFixed(2));
           const facingRad = it.facing * state.D2R;
           const lookTarget = worldToThree(it.x + Math.cos(facingRad), it.y + Math.sin(facingRad), 0);
           g.lookAt(lookTarget.x, g.position.y, lookTarget.z);
