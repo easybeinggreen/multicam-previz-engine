@@ -12,21 +12,20 @@ async function init3D() {
 
   let THREE;
   try {
-    THREE = await import('https://unpkg.com/three@0.160.0/build/three.module.js');
+    THREE = await import('https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.js');
   } catch (err) {
     console.warn('3D viewfinder unavailable — three.js failed to load from CDN. Staying on 2D.', err);
     return;
   }
 
-  // Load GLTFLoader for the Brian model — FIXED URL
+  // Load GLTFLoader using cdnjs
   let GLTFLoader;
   try {
-    const module = await import('https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js');
+    // Using the CDN version that includes all dependencies
+    const module = await import('https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js');
     GLTFLoader = module.GLTFLoader;
   } catch (err) {
     console.warn('GLTFLoader not available, falling back to basic mannequins.', err);
-    // Fallback to basic mannequins if GLTFLoader fails
-    // We'll still continue but use geometric mannequins
   }
 
   let renderer;
@@ -125,7 +124,6 @@ async function init3D() {
         metalness: 0.0,
         emissive: new THREE.Color(0x222222),
         emissiveIntensity: 0.05,
-        // Slight subsurface effect (looks like stone)
         transparent: true,
         opacity: 0.98,
       });
@@ -133,7 +131,6 @@ async function init3D() {
       // Apply the alabaster material to all meshes in the model
       model.traverse((child) => {
         if (child.isMesh) {
-          // Replace with alabaster material
           child.material = alabasterMat.clone();
           child.castShadow = true;
           child.receiveShadow = true;
