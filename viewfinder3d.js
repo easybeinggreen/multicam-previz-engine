@@ -163,7 +163,7 @@ async function init3D() {
     } catch (err) {
       console.warn('3D render failed at runtime — switching back to 2D.', err);
       toggle.checked = false;
-      toggle.onchange && toggle.onchange();
+      if (toggle.onchange) toggle.onchange();
       toggle.disabled = true;
       window.Previz3DRender = null;
     }
@@ -171,18 +171,27 @@ async function init3D() {
 
   // Initialisation succeeded — enable the toggle and switch to 3D by default
   // Define the onchange handler first
-  toggle.onchange = () => {
+  const toggleChangeHandler = () => {
     const use3d = toggle.checked;
     canvas2d.style.display = use3d ? 'none' : 'block';
     canvas3d.style.display = use3d ? 'block' : 'none';
-    if (use3d) {
+    if (use3d && window.Previz3DRender) {
       window.Previz3DRender();
     }
   };
 
+  toggle.onchange = toggleChangeHandler;
   toggle.disabled = false;
   toggle.checked = true;
-  toggle.onchange();  // Trigger the change to show 3D
+  
+  // Manually show 3D canvas and render
+  canvas2d.style.display = 'none';
+  canvas3d.style.display = 'block';
+  
+  // Small delay to ensure the canvas is visible before rendering
+  setTimeout(() => {
+    window.Previz3DRender();
+  }, 50);
 }
 
 // Module scripts execute after deferred/classic scripts have already run, so
