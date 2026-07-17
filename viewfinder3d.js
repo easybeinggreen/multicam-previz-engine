@@ -1,5 +1,8 @@
-// ===== Progressive-enhancement 3D viewfinder with Brian model =====
-// Uses script-tag loaded three.js and GLTFLoader (global)
+// ===== Progressive-enhancement 3D viewfinder =====
+// Uses importmap to load three.js and GLTFLoader properly
+
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 function worldToThree(x, y, z) { 
   return new THREE.Vector3(x, z, -y); 
@@ -10,16 +13,6 @@ async function init3D() {
   const toggle = document.getElementById('use3d');
   const canvas2d = document.getElementById('vf');
   if (!canvas3d || !toggle) return;
-
-  // THREE and GLTFLoader are now global (loaded via script tags)
-  if (typeof THREE === 'undefined') {
-    console.warn('3D viewfinder unavailable — three.js not loaded.');
-    return;
-  }
-
-  if (typeof THREE.GLTFLoader === 'undefined' && typeof GLTFLoader === 'undefined') {
-    console.warn('GLTFLoader not available, falling back to basic mannequins.');
-  }
 
   let renderer;
   try {
@@ -90,18 +83,8 @@ async function init3D() {
   });
 
   // --- Load Brian model (alabaster) ---
-  async function loadBrianModel(color) {
-    // Use global GLTFLoader (loaded via script tag)
-    const Loader = typeof THREE.GLTFLoader !== 'undefined' ? THREE.GLTFLoader : (typeof GLTFLoader !== 'undefined' ? GLTFLoader : null);
-    
-    if (!Loader) {
-      console.warn('GLTFLoader not available — using fallback mannequin');
-      return null;
-    }
-
-    const loader = new Loader();
-    
-    // IMPORTANT: Replace this URL with the actual location of your Brian.glb file
+  async function loadBrianModel() {
+    const loader = new GLTFLoader();
     const url = './brian.glb';
     
     try {
@@ -110,8 +93,6 @@ async function init3D() {
       });
       
       const model = gltf.scene;
-      
-      // Scale the model
       model.scale.set(0.8, 0.8, 0.8);
       
       // Apply alabaster material
@@ -140,12 +121,9 @@ async function init3D() {
     }
   }
 
-  const actorMeshes = new Map();
-  const propMeshes = new Map();
-
-  // Fallback mannequin
+  // --- Build a detailed humanoid mannequin (fallback) ---
   function buildFallbackMannequin(it) {
-    const g = new THREE.Group();
+    const group = new THREE.Group();
     const h = it.h;
     const w = it.w;
     
@@ -155,55 +133,158 @@ async function init3D() {
       metalness: 0.0,
     });
     
-    const torso = new THREE.Mesh(
-      new THREE.CylinderGeometry(w * 0.35, w * 0.25, h * 0.45, 8),
-      alabasterMat
-    );
-    torso.position.y = h * 0.55;
-    torso.castShadow = true;
-    g.add(torso);
+    const skinMat = new THREE.MeshStandardMaterial({
+      color: 0xf0e4d8,
+      roughness: 0.4,
+      metalness: 0.0,
+    });
     
-    const headR = h / 13;
-    const head = new THREE.Mesh(
-      new THREE.SphereGeometry(headR, 16, 12),
-      alabasterMat
-    );
-    head.position.y = h - headR * 0.8;
+    // Head
+    const headR = h * 0.065;
+    const head = new THREE.Mesh(new THREE.SphereGeometry(headR, 16, 12), skinMat);
+    head.position.y = h * 0.92;
     head.castShadow = true;
-    g.add(head);
+    group.add(head);
     
-    return g;
+    // Neck
+    const neck = new THREE.Mesh(
+      new THREE.CylinderGeometry(headR * 0.5, headR * 0.6, h * 0.05, 8),
+      skinMat
+    );
+    neck.position.y = h * 0.82;
+    group.add(neck);
+    
+    // Torso
+    const torso = new THREE.Mesh(
+      new THREE.CylinderGeometry(w * 0.38, w * 0.28, h * 0.38, 10),
+      alabasterMat
+    );
+    torso.position.y = h * 0.58;
+    torso.castShadow = true;
+    group.add(torso);
+    
+    // Shoulders
+    const shoulder = new THREE.Mesh(
+      new THREE.BoxGeometry(w * 0.7, h * 0.04, w * 0.2),
+      alabasterMat
+    );
+    shoulder.position.set(0, h * 0.78, 0);
+    group.add( shoulder);
+    
+    // Arms
+    const armH = h * 0.3;
+    const armR = w * 0.065;
+    [-1, 1].forEach(side => {
+      const arm = new THREE.Mesh(
+        new THREE.CylinderGeometry(armR, armR * 0.7, armH, 8),
+        skinMat
+      );
+      arm.position.set(side * (w * 0.45), h * 0.68, 0);
+      arm.rotation.z = side * 0.1;
+      arm.rotation.x = -0.1;
+      arm.castShadow = true;
+      group.add(arm);
+      
+      // Forearms
+      const foreArm = new THREE.Mesh(
+        new THREE.CylinderGeometry(armR * 0.7, armR * 0.5, armH * 0.7, 8),
+        skinMat
+      );
+      foreArm.position.set(side * (w * 0.47), h * 0.48, 0);
+      foreArm.rotation.z = side * 0.05;
+      foreArm.castShadow = true;
+      group.add(foreArm);
+      
+      // Hands
+      const hand = new THREE.Mesh(
+        new THREE.SphereGeometry(armR * 0.8, 6, 6),
+        skinMat
+      );
+      hand.position.set(side * (w * 0.48), h * 0.38, 0);
+      group.add(hand);
+    });
+    
+    // Pelvis
+    const pelvis = new THREE.Mesh(
+      new THREE.CylinderGeometry(w * 0.3, w * 0.35, h * 0.06, 8),
+      alabasterMat
+    );
+    pelvis.position.set(0, h * 0.38, 0);
+    group.add(pelvis);
+    
+    // Legs
+    const legH = h * 0.3;
+    const legR = w * 0.1;
+    [-1, 1].forEach(side => {
+      const leg = new THREE.Mesh(
+        new THREE.CylinderGeometry(legR, legR * 0.8, legH, 8),
+        alabasterMat
+      );
+      leg.position.set(side * (w * 0.16), h * 0.25, 0);
+      leg.castShadow = true;
+      group.add(leg);
+      
+      const lowerLeg = new THREE.Mesh(
+        new THREE.CylinderGeometry(legR * 0.8, legR * 0.6, legH * 0.85, 8),
+        alabasterMat
+      );
+      lowerLeg.position.set(side * (w * 0.16), h * 0.08, 0);
+      lowerLeg.castShadow = true;
+      group.add(lowerLeg);
+      
+      const foot = new THREE.Mesh(
+        new THREE.BoxGeometry(legR * 1.2, h * 0.03, legR * 2.0),
+        alabasterMat
+      );
+      foot.position.set(side * (w * 0.16), 0.015, legR * 0.3);
+      foot.castShadow = true;
+      group.add(foot);
+    });
+    
+    return group;
   }
 
-  async function syncItems() {
+  const actorMeshes = new Map();
+  const propMeshes = new Map();
+  let brianModel = null;
+
+  // Try to load Brian once at startup
+  loadBrianModel().then(model => {
+    if (model) {
+      brianModel = model;
+      console.log('✅ Brian loaded successfully!');
+      // Re-render to show Brian
+      if (window.Previz3DRender) window.Previz3DRender();
+    } else {
+      console.warn('⚠️ Brian failed to load — using fallback mannequin');
+    }
+  });
+
+  function syncItems() {
     const liveIds = new Set(state.items.map(i => i.id));
     actorMeshes.forEach((mesh, id) => { if (!liveIds.has(id)) { scene.remove(mesh); actorMeshes.delete(id); } });
     propMeshes.forEach((mesh, id) => { if (!liveIds.has(id)) { scene.remove(mesh); propMeshes.delete(id); } });
 
-    for (const it of state.items) {
+    state.items.forEach(it => {
       if (it.type === 'actor') {
         let g = actorMeshes.get(it.id);
         if (!g) {
-          const model = await loadBrianModel(it.color);
-          
-          if (model) {
-            g = model;
-            scene.add(g);
-            actorMeshes.set(it.id, g);
+          // If Brian loaded, use him; otherwise fallback
+          if (brianModel) {
+            // Clone Brian for each actor
+            g = brianModel.clone();
           } else {
             g = buildFallbackMannequin(it);
-            scene.add(g);
-            actorMeshes.set(it.id, g);
           }
+          scene.add(g);
+          actorMeshes.set(it.id, g);
         }
         
-        if (g) {
-          const pos = worldToThree(it.x, it.y, 0);
-          g.position.copy(pos);
-          const facingRad = it.facing * state.D2R;
-          const lookTarget = worldToThree(it.x + Math.cos(facingRad), it.y + Math.sin(facingRad), 0);
-          g.lookAt(lookTarget.x, g.position.y, lookTarget.z);
-        }
+        const pos = worldToThree(it.x, it.y, 0);
+        g.position.copy(pos);
+        const facingRad = it.facing * state.D2R;
+        const lookTarget = worldToThree(it.x + Math.cos(facingRad), it.y + Math.sin(facingRad), 0);
+        g.lookAt(lookTarget.x, g.position.y, lookTarget.z);
       } else {
         let m = propMeshes.get(it.id);
         if (!m) {
@@ -215,7 +296,7 @@ async function init3D() {
         }
         m.position.copy(worldToThree(it.x, it.y, it.h / 2));
       }
-    }
+    });
   }
 
   function resize() {
@@ -266,7 +347,7 @@ async function init3D() {
   
   setTimeout(() => {
     window.Previz3DRender();
-  }, 50);
+  }, 100);
 }
 
-if (window.PrevizState) { init3D(); } else { window.addEventListener('previz-ready', init3D); }
+init3D();
