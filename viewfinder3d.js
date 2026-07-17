@@ -30,6 +30,8 @@ async function init3D() {
     renderer = new THREE.WebGLRenderer({ canvas: canvas3d, antialias: true });
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // Expose renderer for debugging
+    canvas3d.__renderer = renderer;
   } catch (err) {
     console.warn('3D viewfinder unavailable — WebGL could not initialise. Staying on 2D.', err);
     return;
@@ -37,11 +39,14 @@ async function init3D() {
 
   const state = window.PrevizState;
   const scene = new THREE.Scene();
-  // Paler background — light warm grey instead of pure white
+  // Paler background
   scene.background = new THREE.Color(0xf5f0eb);
+  // Expose scene for debugging
+  window.__threeScene = scene;
+  
   const camera = new THREE.PerspectiveCamera(50, 16 / 9, 0.1, 200);
 
-  // Softer lighting for more human look
+  // Softer lighting
   const ambient = new THREE.AmbientLight(0xffffff, 0.6);
   scene.add(ambient);
 
@@ -54,12 +59,11 @@ async function init3D() {
   sun.shadow.camera.near = 0.5; sun.shadow.camera.far = 60;
   scene.add(sun);
 
-  // Fill light from opposite side
   const fill = new THREE.DirectionalLight(0xccddff, 0.3);
   fill.position.set(-5, 10, -8);
   scene.add(fill);
 
-  // Ground with subtle color
+  // Ground
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(80, 80),
     new THREE.MeshStandardMaterial({ color: 0xe8e4df, roughness: 0.8 })
@@ -74,7 +78,7 @@ async function init3D() {
     const center = state.pt(ang, state.R_VIGNETTE);
     const geo = new THREE.PlaneGeometry(state.VIGNETTE_WIDTH_M, state.VIGNETTE_HEIGHT_M);
     const mat = new THREE.MeshStandardMaterial({ 
-      color: 0xcdc4e8,  // Paler purple
+      color: 0xcdc4e8,
       side: THREE.DoubleSide,
       roughness: 0.6,
       metalness: 0.1
@@ -87,11 +91,10 @@ async function init3D() {
     scene.add(mesh);
   });
 
-  // --- Build a more human-like mannequin ---
+  // Build a more human-like mannequin
   function buildMannequin(it) {
     const g = new THREE.Group();
     
-    // Skin and clothing colors
     const skinColor = 0xf5d6c6;
     const shirtColor = it.color || 0x4a90d9;
     const pantsColor = 0x3d3d3d;
@@ -105,21 +108,23 @@ async function init3D() {
     const h = it.h;
     const w = it.w;
     
-    // --- Torso (with shirt) ---
-    const torsoGeo = new THREE.CylinderGeometry(w * 0.35, w * 0.28, h * 0.45, 8);
-    const torso = new THREE.Mesh(torsoGeo, shirtMat);
+    // Torso
+    const torso = new THREE.Mesh(
+      new THREE.CylinderGeometry(w * 0.35, w * 0.28, h * 0.45, 8),
+      shirtMat
+    );
     torso.position.y = h * 0.55;
     torso.castShadow = true;
     g.add(torso);
 
-    // --- Head (with neck) ---
+    // Head
     const headR = h / 13;
     const head = new THREE.Mesh(new THREE.SphereGeometry(headR, 16, 12), skinMat);
     head.position.y = h - headR * 0.9;
     head.castShadow = true;
     g.add(head);
 
-    // --- Neck ---
+    // Neck
     const neck = new THREE.Mesh(
       new THREE.CylinderGeometry(headR * 0.5, headR * 0.6, h * 0.06, 8),
       skinMat
@@ -127,8 +132,7 @@ async function init3D() {
     neck.position.y = h * 0.78;
     g.add(neck);
 
-    // --- Simple face features ---
-    // Nose (small bump)
+    // Nose
     const nose = new THREE.Mesh(
       new THREE.SphereGeometry(headR * 0.12, 6, 6),
       new THREE.MeshStandardMaterial({ color: 0xe8c4a8, roughness: 0.9 })
@@ -136,7 +140,7 @@ async function init3D() {
     nose.position.set(0, h - headR * 0.7, -headR * 0.9);
     g.add(nose);
 
-    // --- Legs (with pants) ---
+    // Legs
     const legH = h * 0.4;
     const legR = w * 0.1;
     [-1, 1].forEach(side => {
@@ -148,7 +152,6 @@ async function init3D() {
       leg.castShadow = true;
       g.add(leg);
       
-      // Shoes
       const shoe = new THREE.Mesh(
         new THREE.BoxGeometry(legR * 1.3, h * 0.04, legR * 2.2),
         shoeMat
@@ -158,7 +161,7 @@ async function init3D() {
       g.add(shoe);
     });
 
-    // --- Arms ---
+    // Arms
     const armH = h * 0.38;
     const armR = w * 0.06;
     [-1, 1].forEach(side => {
@@ -172,7 +175,7 @@ async function init3D() {
       g.add(arm);
     });
 
-    // --- Shoulders (subtle) ---
+    // Shoulders
     const shoulder = new THREE.Mesh(
       new THREE.BoxGeometry(w * 0.6, h * 0.04, w * 0.2),
       shirtMat
@@ -244,7 +247,6 @@ async function init3D() {
     }
   };
 
-  // Initialisation succeeded — enable the toggle and switch to 3D by default
   const toggleChangeHandler = () => {
     const use3d = toggle.checked;
     canvas2d.style.display = use3d ? 'none' : 'block';
