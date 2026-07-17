@@ -94,8 +94,8 @@ async function init3D() {
       
       const model = gltf.scene;
       
-      // Scale Brian down
-      const scaleFactor = 1.5;
+      // Scale Brian — adjust this to get the right size
+      const scaleFactor = 0.017;
       model.scale.set(scaleFactor, scaleFactor, scaleFactor);
       
       // Calculate bounding box to position feet on ground
@@ -103,12 +103,11 @@ async function init3D() {
       const center = box.getCenter(new THREE.Vector3());
       const size = box.getSize(new THREE.Vector3());
       
-      // Move so feet are at y=0
+      // Move so feet are at y=0 (relative to the model's local origin)
       model.position.y = -center.y + (size.y / 2);
       
       console.log('✅ Brian loaded!');
       console.log('Brian size (meters):', size.x * scaleFactor, size.y * scaleFactor, size.z * scaleFactor);
-      console.log('Brian center:', center.x, center.y, center.z);
       
       // Apply alabaster material
       const alabasterMat = new THREE.MeshStandardMaterial({
@@ -126,6 +125,23 @@ async function init3D() {
           child.material = alabasterMat.clone();
           child.castShadow = true;
           child.receiveShadow = true;
+        }
+      });
+      
+      // --- Fix T-pose: rotate arms down ---
+      // Try to find arm bones and rotate them
+      model.traverse((child) => {
+        if (child.isBone) {
+          // Look for arm bones
+          const name = child.name.toLowerCase();
+          if (name.includes('arm') || name.includes('shoulder') || name.includes('upperarm')) {
+            // Rotate arms down slightly
+            if (name.includes('left')) {
+              child.rotation.z = 0.3;
+            } else if (name.includes('right')) {
+              child.rotation.z = -0.3;
+            }
+          }
         }
       });
       
@@ -186,7 +202,7 @@ async function init3D() {
     shoulder.position.set(0, h * 0.78, 0);
     group.add(shoulder);
     
-    // Arms
+    // Arms (relaxed, not T-pose)
     const armH = h * 0.3;
     const armR = w * 0.065;
     [-1, 1].forEach(side => {
@@ -194,19 +210,19 @@ async function init3D() {
         new THREE.CylinderGeometry(armR, armR * 0.7, armH, 8),
         skinMat
       );
-      arm.position.set(side * (w * 0.45), h * 0.68, 0);
-      arm.rotation.z = side * 0.1;
+      arm.position.set(side * (w * 0.4), h * 0.6, 0);
+      arm.rotation.z = side * 0.4;  // Arms down at sides
       arm.rotation.x = -0.1;
       arm.castShadow = true;
       group.add(arm);
       
-      // Forearms
+      // Forearms (hanging down)
       const foreArm = new THREE.Mesh(
         new THREE.CylinderGeometry(armR * 0.7, armR * 0.5, armH * 0.7, 8),
         skinMat
       );
-      foreArm.position.set(side * (w * 0.47), h * 0.48, 0);
-      foreArm.rotation.z = side * 0.05;
+      foreArm.position.set(side * (w * 0.38), h * 0.38, 0);
+      foreArm.rotation.z = side * 0.3;
       foreArm.castShadow = true;
       group.add(foreArm);
       
@@ -215,7 +231,7 @@ async function init3D() {
         new THREE.SphereGeometry(armR * 0.8, 6, 6),
         skinMat
       );
-      hand.position.set(side * (w * 0.48), h * 0.38, 0);
+      hand.position.set(side * (w * 0.38), h * 0.3, 0);
       group.add(hand);
     });
     
@@ -268,7 +284,6 @@ async function init3D() {
     if (model) {
       brianModel = model;
       console.log('✅ Brian ready for use!');
-      // Re-render to show Brian
       if (window.Previz3DRender) window.Previz3DRender();
     } else {
       console.warn('⚠️ Brian failed to load — using fallback mannequin');
@@ -284,7 +299,6 @@ async function init3D() {
       if (it.type === 'actor') {
         let g = actorMeshes.get(it.id);
         if (!g) {
-          // If Brian loaded, use him; otherwise fallback
           if (brianModel) {
             // Clone Brian for each actor
             g = brianModel.clone();
@@ -295,8 +309,11 @@ async function init3D() {
           actorMeshes.set(it.id, g);
         }
         
+        // Position at the actor's location (NOT at 0,0,0)
         const pos = worldToThree(it.x, it.y, 0);
         g.position.copy(pos);
+        
+        // Face the correct direction
         const facingRad = it.facing * state.D2R;
         const lookTarget = worldToThree(it.x + Math.cos(facingRad), it.y + Math.sin(facingRad), 0);
         g.lookAt(lookTarget.x, g.position.y, lookTarget.z);
