@@ -18,14 +18,15 @@ async function init3D() {
     return;
   }
 
-  // Load GLTFLoader for the Brian model
+  // Load GLTFLoader for the Brian model — FIXED URL
   let GLTFLoader;
   try {
     const module = await import('https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js');
     GLTFLoader = module.GLTFLoader;
   } catch (err) {
     console.warn('GLTFLoader not available, falling back to basic mannequins.', err);
-    return;
+    // Fallback to basic mannequins if GLTFLoader fails
+    // We'll still continue but use geometric mannequins
   }
 
   let renderer;
@@ -97,15 +98,14 @@ async function init3D() {
   });
 
   // --- Load Brian model (alabaster) ---
-  let modelCache = new Map();
-
   async function loadBrianModel(color) {
+    // If GLTFLoader isn't available, return null
+    if (!GLTFLoader) {
+      console.warn('GLTFLoader not available — using fallback mannequin');
+      return null;
+    }
+
     const loader = new GLTFLoader();
-    
-    // You'll need to host Brian.glb somewhere accessible
-    // Option 1: Place in the same folder as index.html and reference it
-    // Option 2: Upload to GitHub and use the raw URL
-    // Option 3: Use a CDN if you have one
     
     // IMPORTANT: Replace this URL with the actual location of your Brian.glb file
     const url = './brian.glb'; // <-- CHANGE THIS TO YOUR FILE PATH
@@ -152,59 +152,6 @@ async function init3D() {
   const actorMeshes = new Map();
   const propMeshes = new Map();
 
-  // Flag to track if models are loading
-  let modelsLoading = false;
-  let modelsLoaded = false;
-
-  async function syncItems() {
-    const liveIds = new Set(state.items.map(i => i.id));
-    actorMeshes.forEach((mesh, id) => { if (!liveIds.has(id)) { scene.remove(mesh); actorMeshes.delete(id); } });
-    propMeshes.forEach((mesh, id) => { if (!liveIds.has(id)) { scene.remove(mesh); propMeshes.delete(id); } });
-
-    // Load models for each actor
-    for (const it of state.items) {
-      if (it.type === 'actor') {
-        let g = actorMeshes.get(it.id);
-        if (!g) {
-          modelsLoading = true;
-          const model = await loadBrianModel(it.color);
-          modelsLoading = false;
-          
-          if (model) {
-            modelsLoaded = true;
-            g = model;
-            scene.add(g);
-            actorMeshes.set(it.id, g);
-          } else {
-            // Fallback to basic mannequin if model fails to load
-            console.warn('Using fallback mannequin for actor', it.id);
-            g = buildFallbackMannequin(it);
-            scene.add(g);
-            actorMeshes.set(it.id, g);
-          }
-        }
-        
-        if (g) {
-          const pos = worldToThree(THREE, it.x, it.y, 0);
-          g.position.copy(pos);
-          const facingRad = it.facing * state.D2R;
-          const lookTarget = worldToThree(THREE, it.x + Math.cos(facingRad), it.y + Math.sin(facingRad), 0);
-          g.lookAt(lookTarget.x, g.position.y, lookTarget.z);
-        }
-      } else {
-        let m = propMeshes.get(it.id);
-        if (!m) {
-          const geo = new THREE.BoxGeometry(it.w, it.h, it.w * 0.7);
-          const mat = new THREE.MeshStandardMaterial({ color: it.color, roughness: 0.7 });
-          m = new THREE.Mesh(geo, mat);
-          m.castShadow = true; m.receiveShadow = true;
-          scene.add(m); propMeshes.set(it.id, m);
-        }
-        m.position.copy(worldToThree(THREE, it.x, it.y, it.h / 2));
-      }
-    }
-  }
-
   // Fallback mannequin if Brian doesn't load
   function buildFallbackMannequin(it) {
     const g = new THREE.Group();
@@ -236,6 +183,52 @@ async function init3D() {
     g.add(head);
     
     return g;
+  }
+
+  async function syncItems() {
+    const liveIds = new Set(state.items.map(i => i.id));
+    actorMeshes.forEach((mesh, id) => { if (!liveIds.has(id)) { scene.remove(mesh); actorMeshes.delete(id); } });
+    propMeshes.forEach((mesh, id) => { if (!liveIds.has(id)) { scene.remove(mesh); propMeshes.delete(id); } });
+
+    // Load models for each actor
+    for (const it of state.items) {
+      if (it.type === 'actor') {
+        let g = actorMeshes.get(it.id);
+        if (!g) {
+          const model = await loadBrianModel(it.color);
+          
+          if (model) {
+            g = model;
+            scene.add(g);
+            actorMeshes.set(it.id, g);
+          } else {
+            // Fallback to basic mannequin if model fails to load
+            console.warn('Using fallback mannequin for actor', it.id);
+            g = buildFallbackMannequin(it);
+            scene.add(g);
+            actorMeshes.set(it.id, g);
+          }
+        }
+        
+        if (g) {
+          const pos = worldToThree(THREE, it.x, it.y, 0);
+          g.position.copy(pos);
+          const facingRad = it.facing * state.D2R;
+          const lookTarget = worldToThree(THREE, it.x + Math.cos(facingRad), it.y + Math.sin(facingRad), 0);
+          g.lookAt(lookTarget.x, g.position.y, lookTarget.z);
+        }
+      } else {
+        let m = propMeshes.get(it.id);
+        if (!m) {
+          const geo = new THREE.BoxGeometry(it.w, it.h, it.w * 0.7);
+          const mat = new THREE.MeshStandardMaterial({ color: it.color, roughness: 0.7 });
+          m = new THREE.Mesh(geo, mat);
+          m.castShadow = true; m.receiveShadow = true;
+          scene.add(m); propMeshes.set(it.id, m);
+        }
+        m.position.copy(worldToThree(THREE, it.x, it.y, it.h / 2));
+      }
+    }
   }
 
   function resize() {
