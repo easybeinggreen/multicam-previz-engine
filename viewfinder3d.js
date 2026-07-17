@@ -93,7 +93,22 @@ async function init3D() {
       });
       
       const model = gltf.scene;
-      model.scale.set(0.02, 0.02, 0.02);
+      
+      // Scale Brian down
+      const scaleFactor = 0.015;
+      model.scale.set(scaleFactor, scaleFactor, scaleFactor);
+      
+      // Calculate bounding box to position feet on ground
+      const box = new THREE.Box3().setFromObject(model);
+      const center = box.getCenter(new THREE.Vector3());
+      const size = box.getSize(new THREE.Vector3());
+      
+      // Move so feet are at y=0
+      model.position.y = -center.y + (size.y / 2);
+      
+      console.log('✅ Brian loaded!');
+      console.log('Brian size (meters):', size.x * scaleFactor, size.y * scaleFactor, size.z * scaleFactor);
+      console.log('Brian center:', center.x, center.y, center.z);
       
       // Apply alabaster material
       const alabasterMat = new THREE.MeshStandardMaterial({
@@ -169,7 +184,7 @@ async function init3D() {
       alabasterMat
     );
     shoulder.position.set(0, h * 0.78, 0);
-    group.add( shoulder);
+    group.add(shoulder);
     
     // Arms
     const armH = h * 0.3;
@@ -252,7 +267,7 @@ async function init3D() {
   loadBrianModel().then(model => {
     if (model) {
       brianModel = model;
-      console.log('✅ Brian loaded successfully!');
+      console.log('✅ Brian ready for use!');
       // Re-render to show Brian
       if (window.Previz3DRender) window.Previz3DRender();
     } else {
