@@ -128,7 +128,10 @@ canvas {
 }
 #fp { height: 560px; cursor: grab; }
 #fp:active { cursor: grabbing; }
-#vf { height: 400px; }
+#vf, #vf3d { height: 400px; }
+
+.use3d-row { display: block; margin-bottom: 2px; }
+.use3d-row input { width: auto; margin-right: 5px; vertical-align: middle; }
 
 .vf-wrap { position: relative; }
 

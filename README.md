@@ -68,6 +68,32 @@ middle of the room is **audience seating** (three rectangular blocks,
 standing at a chosen Vignette mark (via the "Stand at" dropdown) and
 remain freely draggable from there.
 
+## 3D viewfinder (optional, auto-enabled)
+
+`viewfinder3d.js` renders the viewfinder as a real lit three.js scene
+(capsule-and-sphere mannequins with proper shadows, instead of 2D
+sprites) when the browser supports it. It's pure progressive
+enhancement — `app.js` and the 2D canvas (`#vf`) work completely
+independently of it. If three.js can't load from its CDN, or WebGL
+isn't available, the 3D module quietly does nothing and you stay on
+the 2D viewfinder automatically. A checkbox above the viewfinder
+("Use 3D viewfinder") lets you switch back to 2D any time, or forces
+2D if 3D ever misbehaves.
+
+**Important local-testing gotcha:** the 3D module uses an ES module
+import, and browsers block ES module imports from `file://` URLs for
+security reasons. That means **double-clicking `index.html` locally
+will show a blank/disabled 3D toggle** — the floor plan and 2D
+viewfinder still work fine, but 3D only activates when the page is
+actually served (GitHub Pages, or a local dev server). This isn't a
+bug, just how browsers treat local files.
+
+Coordinate mapping for the 3D scene: world (x, y, z-up) maps to three.js
+(x, z, -y) — the sign flip on y is required to keep the mapping
+right-handed (a straight axis swap without it mirrors the scene).
+Camera FOV is computed with the exact same focal-length formula the 2D
+viewfinder uses, so both views agree on what a given lens shows.
+
 ## Known limitations (this is a mockup)
 
 - Actors render as simplified 2D sprites (shaded capsule body + shaded

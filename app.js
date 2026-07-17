@@ -207,7 +207,7 @@ function project(c, basis, angles, w, h, px, py, pz) {
   return { x: w / 2 + ndx * w / 2, y: h / 2 - ndy * h / 2, depth: zc };
 }
 
-function render() { drawFP(); drawVF(); }
+function render() { drawFP(); drawVF(); if (window.Previz3DRender) window.Previz3DRender(); }
 
 // ---------- Floor plan ----------
 function drawFP() {
@@ -507,3 +507,12 @@ fpCanvas.addEventListener('wheel', e => {
 
 syncActorSel(); syncControls(); render();
 window.addEventListener('resize', render);
+
+// Minimal read-only handle for the optional 3D viewfinder module. The 2D
+// canvas above remains fully independent and keeps working with or without
+// this — viewfinder3d.js is progressive enhancement, not a dependency.
+window.PrevizState = {
+  CAMS, items, V, R_VIGNETTE, VIGNETTE_WIDTH_M, VIGNETTE_HEIGHT_M, D2R, pt, fov,
+  get active() { return active; }
+};
+window.dispatchEvent(new Event('previz-ready'));

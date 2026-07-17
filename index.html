@@ -100,8 +100,10 @@
       </div>
       <div class="view-block">
         <div class="view-caption">Director's viewfinder (16:9)</div>
+        <label class="hint use3d-row"><input type="checkbox" id="use3d" disabled> Use 3D viewfinder (enables automatically if your browser supports it)</label>
         <div class="vf-wrap">
           <canvas id="vf" width="640" height="360"></canvas>
+          <canvas id="vf3d" width="960" height="540" style="display:none"></canvas>
           <div class="hud">
             <div id="hcam" class="hud-cam"></div>
             <div id="hlens" class="hud-lens"></div>
@@ -113,5 +115,6 @@
   </div>
 </div>
 <script src="app.js"></script>
+<script type="module" src="viewfinder3d.js"></script>
 </body>
 </html>
