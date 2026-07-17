@@ -172,6 +172,7 @@ async function init3D() {
   // Initialisation succeeded — enable the toggle and switch to 3D by default
   toggle.disabled = false;
   toggle.checked = true;
+  toggle.onchange();
   canvas2d.style.display = 'none';
   canvas3d.style.display = 'block';
   toggle.onchange = () => {
