@@ -1,8 +1,9 @@
 // ===== Progressive-enhancement 3D viewfinder with Brian model =====
-// Loads a realistic human model (Brian from Mixamo) and renders it as
-// an alabaster (white stone) mannequin.
+// Uses script-tag loaded three.js and GLTFLoader (global)
 
-function worldToThree(THREE, x, y, z) { return new THREE.Vector3(x, z, -y); }
+function worldToThree(x, y, z) { 
+  return new THREE.Vector3(x, z, -y); 
+}
 
 async function init3D() {
   const canvas3d = document.getElementById('vf3d');
@@ -10,22 +11,14 @@ async function init3D() {
   const canvas2d = document.getElementById('vf');
   if (!canvas3d || !toggle) return;
 
-  let THREE;
-  try {
-    THREE = await import('https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.js');
-  } catch (err) {
-    console.warn('3D viewfinder unavailable — three.js failed to load from CDN. Staying on 2D.', err);
+  // THREE and GLTFLoader are now global (loaded via script tags)
+  if (typeof THREE === 'undefined') {
+    console.warn('3D viewfinder unavailable — three.js not loaded.');
     return;
   }
 
-  // Load GLTFLoader using cdnjs
-  let GLTFLoader;
-  try {
-    // Using the CDN version that includes all dependencies
-    const module = await import('https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js');
-    GLTFLoader = module.GLTFLoader;
-  } catch (err) {
-    console.warn('GLTFLoader not available, falling back to basic mannequins.', err);
+  if (typeof THREE.GLTFLoader === 'undefined' && typeof GLTFLoader === 'undefined') {
+    console.warn('GLTFLoader not available, falling back to basic mannequins.');
   }
 
   let renderer;
@@ -46,7 +39,7 @@ async function init3D() {
   
   const camera = new THREE.PerspectiveCamera(50, 16 / 9, 0.1, 200);
 
-  // Better lighting for alabaster look
+  // Lighting
   const ambient = new THREE.AmbientLight(0xffffff, 0.5);
   scene.add(ambient);
   
@@ -89,8 +82,8 @@ async function init3D() {
       metalness: 0.1
     });
     const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.copy(worldToThree(THREE, center.x, center.y, state.VIGNETTE_HEIGHT_M / 2));
-    const outward = worldToThree(THREE, center.x + Math.cos(rad) * 5, center.y + Math.sin(rad) * 5, state.VIGNETTE_HEIGHT_M / 2);
+    mesh.position.copy(worldToThree(center.x, center.y, state.VIGNETTE_HEIGHT_M / 2));
+    const outward = worldToThree(center.x + Math.cos(rad) * 5, center.y + Math.sin(rad) * 5, state.VIGNETTE_HEIGHT_M / 2);
     mesh.lookAt(outward);
     mesh.receiveShadow = true;
     scene.add(mesh);
@@ -98,26 +91,30 @@ async function init3D() {
 
   // --- Load Brian model (alabaster) ---
   async function loadBrianModel(color) {
-    // If GLTFLoader isn't available, return null
-    if (!GLTFLoader) {
+    // Use global GLTFLoader (loaded via script tag)
+    const Loader = typeof THREE.GLTFLoader !== 'undefined' ? THREE.GLTFLoader : (typeof GLTFLoader !== 'undefined' ? GLTFLoader : null);
+    
+    if (!Loader) {
       console.warn('GLTFLoader not available — using fallback mannequin');
       return null;
     }
 
-    const loader = new GLTFLoader();
+    const loader = new Loader();
     
     // IMPORTANT: Replace this URL with the actual location of your Brian.glb file
-    const url = './brian.glb'; // <-- CHANGE THIS TO YOUR FILE PATH
+    const url = './brian.glb';
     
     try {
-      const gltf = await loader.loadAsync(url);
+      const gltf = await new Promise((resolve, reject) => {
+        loader.load(url, resolve, undefined, reject);
+      });
+      
       const model = gltf.scene;
       
-      // Scale the model to match our world units
+      // Scale the model
       model.scale.set(0.8, 0.8, 0.8);
       
-      // --- Apply alabaster material to everything ---
-      // Alabaster color: warm white with slight translucency
+      // Apply alabaster material
       const alabasterMat = new THREE.MeshStandardMaterial({
         color: 0xf5f0eb,
         roughness: 0.4,
@@ -128,7 +125,6 @@ async function init3D() {
         opacity: 0.98,
       });
       
-      // Apply the alabaster material to all meshes in the model
       model.traverse((child) => {
         if (child.isMesh) {
           child.material = alabasterMat.clone();
@@ -140,8 +136,6 @@ async function init3D() {
       return model;
     } catch (err) {
       console.error('Failed to load Brian model:', err);
-      console.warn('Make sure brian.glb is in the same folder as index.html');
-      console.warn('Or update the URL in the code to point to the correct location.');
       return null;
     }
   }
@@ -149,7 +143,7 @@ async function init3D() {
   const actorMeshes = new Map();
   const propMeshes = new Map();
 
-  // Fallback mannequin if Brian doesn't load
+  // Fallback mannequin
   function buildFallbackMannequin(it) {
     const g = new THREE.Group();
     const h = it.h;
@@ -161,7 +155,6 @@ async function init3D() {
       metalness: 0.0,
     });
     
-    // Simple geometric body
     const torso = new THREE.Mesh(
       new THREE.CylinderGeometry(w * 0.35, w * 0.25, h * 0.45, 8),
       alabasterMat
@@ -187,7 +180,6 @@ async function init3D() {
     actorMeshes.forEach((mesh, id) => { if (!liveIds.has(id)) { scene.remove(mesh); actorMeshes.delete(id); } });
     propMeshes.forEach((mesh, id) => { if (!liveIds.has(id)) { scene.remove(mesh); propMeshes.delete(id); } });
 
-    // Load models for each actor
     for (const it of state.items) {
       if (it.type === 'actor') {
         let g = actorMeshes.get(it.id);
@@ -199,8 +191,6 @@ async function init3D() {
             scene.add(g);
             actorMeshes.set(it.id, g);
           } else {
-            // Fallback to basic mannequin if model fails to load
-            console.warn('Using fallback mannequin for actor', it.id);
             g = buildFallbackMannequin(it);
             scene.add(g);
             actorMeshes.set(it.id, g);
@@ -208,10 +198,10 @@ async function init3D() {
         }
         
         if (g) {
-          const pos = worldToThree(THREE, it.x, it.y, 0);
+          const pos = worldToThree(it.x, it.y, 0);
           g.position.copy(pos);
           const facingRad = it.facing * state.D2R;
-          const lookTarget = worldToThree(THREE, it.x + Math.cos(facingRad), it.y + Math.sin(facingRad), 0);
+          const lookTarget = worldToThree(it.x + Math.cos(facingRad), it.y + Math.sin(facingRad), 0);
           g.lookAt(lookTarget.x, g.position.y, lookTarget.z);
         }
       } else {
@@ -223,7 +213,7 @@ async function init3D() {
           m.castShadow = true; m.receiveShadow = true;
           scene.add(m); propMeshes.set(it.id, m);
         }
-        m.position.copy(worldToThree(THREE, it.x, it.y, it.h / 2));
+        m.position.copy(worldToThree(it.x, it.y, it.h / 2));
       }
     }
   }
@@ -244,8 +234,8 @@ async function init3D() {
     const angles = state.fov(cam.lens);
     camera.fov = angles.v * 180 / Math.PI;
     camera.updateProjectionMatrix();
-    camera.position.copy(worldToThree(THREE, cam.x, cam.y, cam.z));
-    camera.lookAt(worldToThree(THREE, cam.aimX, cam.aimY, cam.aimZ));
+    camera.position.copy(worldToThree(cam.x, cam.y, cam.z));
+    camera.lookAt(worldToThree(cam.aimX, cam.aimY, cam.aimZ));
     syncItems();
     try {
       renderer.render(scene, camera);
