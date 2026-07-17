@@ -1,13 +1,6 @@
-// ===== Progressive-enhancement 3D viewfinder =====
-// Reads camera/actor state from window.PrevizState (published by app.js) and
-// renders it with three.js on a second canvas (#vf3d). If three.js can't be
-// loaded (no network to the CDN) or WebGL can't be created (unsupported
-// browser/GPU), this quietly does nothing and the existing 2D canvas (#vf)
-// stays exactly as it was — nothing here can break the 2D viewfinder.
-//
-// Coordinate mapping: our world uses X/Y as the floor plane and Z as height.
-// three.js uses Y as height. Mapped as (worldX, worldZ, -worldY) — the sign
-// flip on Y keeps the mapping right-handed (checked by hand; see README).
+// ===== Progressive-enhancement 3D viewfinder with Brian model =====
+// Loads a realistic human model (Brian from Mixamo) and renders it as
+// an alabaster (white stone) mannequin.
 
 function worldToThree(THREE, x, y, z) { return new THREE.Vector3(x, z, -y); }
 
@@ -25,13 +18,23 @@ async function init3D() {
     return;
   }
 
+  // Load GLTFLoader for the Brian model
+  let GLTFLoader;
+  try {
+    const module = await import('https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js');
+    GLTFLoader = module.GLTFLoader;
+  } catch (err) {
+    console.warn('GLTFLoader not available, falling back to basic mannequins.', err);
+    return;
+  }
+
   let renderer;
   try {
     renderer = new THREE.WebGLRenderer({ canvas: canvas3d, antialias: true });
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    // Expose renderer for debugging
-    canvas3d.__renderer = renderer;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.2;
   } catch (err) {
     console.warn('3D viewfinder unavailable — WebGL could not initialise. Staying on 2D.', err);
     return;
@@ -39,29 +42,31 @@ async function init3D() {
 
   const state = window.PrevizState;
   const scene = new THREE.Scene();
-  // Paler background
   scene.background = new THREE.Color(0xf5f0eb);
-  // Expose scene for debugging
-  window.__threeScene = scene;
   
   const camera = new THREE.PerspectiveCamera(50, 16 / 9, 0.1, 200);
 
-  // Softer lighting
-  const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+  // Better lighting for alabaster look
+  const ambient = new THREE.AmbientLight(0xffffff, 0.5);
   scene.add(ambient);
+  
+  const mainLight = new THREE.DirectionalLight(0xffeedd, 1.5);
+  mainLight.position.set(10, 15, 10);
+  mainLight.castShadow = true;
+  mainLight.shadow.mapSize.set(2048, 2048);
+  mainLight.shadow.camera.left = -20;
+  mainLight.shadow.camera.right = 20;
+  mainLight.shadow.camera.top = 20;
+  mainLight.shadow.camera.bottom = -20;
+  scene.add(mainLight);
 
-  const sun = new THREE.DirectionalLight(0xffeedd, 0.9);
-  sun.position.set(8, 20, 8);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.camera.left = -22; sun.shadow.camera.right = 22;
-  sun.shadow.camera.top = 22; sun.shadow.camera.bottom = -22;
-  sun.shadow.camera.near = 0.5; sun.shadow.camera.far = 60;
-  scene.add(sun);
+  const fillLight = new THREE.DirectionalLight(0x8888ff, 0.3);
+  fillLight.position.set(-10, 5, -10);
+  scene.add(fillLight);
 
-  const fill = new THREE.DirectionalLight(0xccddff, 0.3);
-  fill.position.set(-5, 10, -8);
-  scene.add(fill);
+  const rimLight = new THREE.DirectionalLight(0xffffff, 0.2);
+  rimLight.position.set(0, 10, -20);
+  scene.add(rimLight);
 
   // Ground
   const ground = new THREE.Mesh(
@@ -72,7 +77,7 @@ async function init3D() {
   ground.receiveShadow = true;
   scene.add(ground);
 
-  // Vignette wall panels — paler purple
+  // Vignette walls
   Object.entries(state.V).forEach(([name, ang]) => {
     const rad = ang * state.D2R;
     const center = state.pt(ang, state.R_VIGNETTE);
@@ -91,118 +96,101 @@ async function init3D() {
     scene.add(mesh);
   });
 
-  // Build a more human-like mannequin
-  function buildMannequin(it) {
-    const g = new THREE.Group();
+  // --- Load Brian model (alabaster) ---
+  let modelCache = new Map();
+
+  async function loadBrianModel(color) {
+    const loader = new GLTFLoader();
     
-    const skinColor = 0xf5d6c6;
-    const shirtColor = it.color || 0x4a90d9;
-    const pantsColor = 0x3d3d3d;
-    const shoeColor = 0x2a2a2a;
+    // You'll need to host Brian.glb somewhere accessible
+    // Option 1: Place in the same folder as index.html and reference it
+    // Option 2: Upload to GitHub and use the raw URL
+    // Option 3: Use a CDN if you have one
     
-    const skinMat = new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.7 });
-    const shirtMat = new THREE.MeshStandardMaterial({ color: shirtColor, roughness: 0.8 });
-    const pantsMat = new THREE.MeshStandardMaterial({ color: pantsColor, roughness: 0.9 });
-    const shoeMat = new THREE.MeshStandardMaterial({ color: shoeColor, roughness: 0.9 });
-
-    const h = it.h;
-    const w = it.w;
+    // IMPORTANT: Replace this URL with the actual location of your Brian.glb file
+    const url = './brian.glb'; // <-- CHANGE THIS TO YOUR FILE PATH
     
-    // Torso
-    const torso = new THREE.Mesh(
-      new THREE.CylinderGeometry(w * 0.35, w * 0.28, h * 0.45, 8),
-      shirtMat
-    );
-    torso.position.y = h * 0.55;
-    torso.castShadow = true;
-    g.add(torso);
-
-    // Head
-    const headR = h / 13;
-    const head = new THREE.Mesh(new THREE.SphereGeometry(headR, 16, 12), skinMat);
-    head.position.y = h - headR * 0.9;
-    head.castShadow = true;
-    g.add(head);
-
-    // Neck
-    const neck = new THREE.Mesh(
-      new THREE.CylinderGeometry(headR * 0.5, headR * 0.6, h * 0.06, 8),
-      skinMat
-    );
-    neck.position.y = h * 0.78;
-    g.add(neck);
-
-    // Nose
-    const nose = new THREE.Mesh(
-      new THREE.SphereGeometry(headR * 0.12, 6, 6),
-      new THREE.MeshStandardMaterial({ color: 0xe8c4a8, roughness: 0.9 })
-    );
-    nose.position.set(0, h - headR * 0.7, -headR * 0.9);
-    g.add(nose);
-
-    // Legs
-    const legH = h * 0.4;
-    const legR = w * 0.1;
-    [-1, 1].forEach(side => {
-      const leg = new THREE.Mesh(
-        new THREE.CylinderGeometry(legR, legR * 0.85, legH, 8),
-        pantsMat
-      );
-      leg.position.set(side * w * 0.15, legH / 2, 0);
-      leg.castShadow = true;
-      g.add(leg);
+    try {
+      const gltf = await loader.loadAsync(url);
+      const model = gltf.scene;
       
-      const shoe = new THREE.Mesh(
-        new THREE.BoxGeometry(legR * 1.3, h * 0.04, legR * 2.2),
-        shoeMat
-      );
-      shoe.position.set(side * w * 0.15, 0.02, legR * 0.3);
-      shoe.castShadow = true;
-      g.add(shoe);
-    });
-
-    // Arms
-    const armH = h * 0.38;
-    const armR = w * 0.06;
-    [-1, 1].forEach(side => {
-      const arm = new THREE.Mesh(
-        new THREE.CylinderGeometry(armR, armR * 0.8, armH, 8),
-        skinMat
-      );
-      arm.position.set(side * w * 0.48, h * 0.65, 0);
-      arm.rotation.z = side * 0.15;
-      arm.castShadow = true;
-      g.add(arm);
-    });
-
-    // Shoulders
-    const shoulder = new THREE.Mesh(
-      new THREE.BoxGeometry(w * 0.6, h * 0.04, w * 0.2),
-      shirtMat
-    );
-    shoulder.position.set(0, h * 0.78, 0);
-    g.add(shoulder);
-
-    return g;
+      // Scale the model to match our world units
+      model.scale.set(0.8, 0.8, 0.8);
+      
+      // --- Apply alabaster material to everything ---
+      // Alabaster color: warm white with slight translucency
+      const alabasterMat = new THREE.MeshStandardMaterial({
+        color: 0xf5f0eb,
+        roughness: 0.4,
+        metalness: 0.0,
+        emissive: new THREE.Color(0x222222),
+        emissiveIntensity: 0.05,
+        // Slight subsurface effect (looks like stone)
+        transparent: true,
+        opacity: 0.98,
+      });
+      
+      // Apply the alabaster material to all meshes in the model
+      model.traverse((child) => {
+        if (child.isMesh) {
+          // Replace with alabaster material
+          child.material = alabasterMat.clone();
+          child.castShadow = true;
+          child.receiveShadow = true;
+        }
+      });
+      
+      return model;
+    } catch (err) {
+      console.error('Failed to load Brian model:', err);
+      console.warn('Make sure brian.glb is in the same folder as index.html');
+      console.warn('Or update the URL in the code to point to the correct location.');
+      return null;
+    }
   }
 
   const actorMeshes = new Map();
   const propMeshes = new Map();
 
-  function syncItems() {
+  // Flag to track if models are loading
+  let modelsLoading = false;
+  let modelsLoaded = false;
+
+  async function syncItems() {
     const liveIds = new Set(state.items.map(i => i.id));
     actorMeshes.forEach((mesh, id) => { if (!liveIds.has(id)) { scene.remove(mesh); actorMeshes.delete(id); } });
     propMeshes.forEach((mesh, id) => { if (!liveIds.has(id)) { scene.remove(mesh); propMeshes.delete(id); } });
 
-    state.items.forEach(it => {
+    // Load models for each actor
+    for (const it of state.items) {
       if (it.type === 'actor') {
         let g = actorMeshes.get(it.id);
-        if (!g) { g = buildMannequin(it); scene.add(g); actorMeshes.set(it.id, g); }
-        const pos = worldToThree(THREE, it.x, it.y, 0);
-        g.position.copy(pos);
-        const facingRad = it.facing * state.D2R;
-        const lookTarget = worldToThree(THREE, it.x + Math.cos(facingRad), it.y + Math.sin(facingRad), 0);
-        g.lookAt(lookTarget.x, g.position.y, lookTarget.z);
+        if (!g) {
+          modelsLoading = true;
+          const model = await loadBrianModel(it.color);
+          modelsLoading = false;
+          
+          if (model) {
+            modelsLoaded = true;
+            g = model;
+            scene.add(g);
+            actorMeshes.set(it.id, g);
+          } else {
+            // Fallback to basic mannequin if model fails to load
+            console.warn('Using fallback mannequin for actor', it.id);
+            g = buildFallbackMannequin(it);
+            scene.add(g);
+            actorMeshes.set(it.id, g);
+          }
+        }
+        
+        if (g) {
+          const pos = worldToThree(THREE, it.x, it.y, 0);
+          g.position.copy(pos);
+          const facingRad = it.facing * state.D2R;
+          const lookTarget = worldToThree(THREE, it.x + Math.cos(facingRad), it.y + Math.sin(facingRad), 0);
+          g.lookAt(lookTarget.x, g.position.y, lookTarget.z);
+        }
       } else {
         let m = propMeshes.get(it.id);
         if (!m) {
@@ -214,7 +202,40 @@ async function init3D() {
         }
         m.position.copy(worldToThree(THREE, it.x, it.y, it.h / 2));
       }
+    }
+  }
+
+  // Fallback mannequin if Brian doesn't load
+  function buildFallbackMannequin(it) {
+    const g = new THREE.Group();
+    const h = it.h;
+    const w = it.w;
+    
+    const alabasterMat = new THREE.MeshStandardMaterial({
+      color: 0xf5f0eb,
+      roughness: 0.3,
+      metalness: 0.0,
     });
+    
+    // Simple geometric body
+    const torso = new THREE.Mesh(
+      new THREE.CylinderGeometry(w * 0.35, w * 0.25, h * 0.45, 8),
+      alabasterMat
+    );
+    torso.position.y = h * 0.55;
+    torso.castShadow = true;
+    g.add(torso);
+    
+    const headR = h / 13;
+    const head = new THREE.Mesh(
+      new THREE.SphereGeometry(headR, 16, 12),
+      alabasterMat
+    );
+    head.position.y = h - headR * 0.8;
+    head.castShadow = true;
+    g.add(head);
+    
+    return g;
   }
 
   function resize() {
