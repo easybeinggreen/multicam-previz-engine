@@ -1,7 +1,8 @@
 // ===== Progressive-enhancement 3D viewfinder =====
-// Uses importmap to load three.js (no GLTFLoader needed)
+// Uses importmap to load three.js and GLTFLoader
 
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 function worldToThree(x, y, z) { 
   return new THREE.Vector3(x, z, -y); 
@@ -81,180 +82,107 @@ async function init3D() {
     scene.add(mesh);
   });
 
-  // --- Build a HUMAN-LOOKING mannequin from primitives ---
-  function buildHumanMannequin(it) {
-    const group = new THREE.Group();
-    const h = it.h;
-    const w = it.w;
+  // --- Load Brian model ---
+  async function loadBrianModel() {
+    const loader = new GLTFLoader();
+    // IMPORTANT: Make sure this path is correct
+    const url = './brian.glb';
     
-    // Alabaster material
-    const alabasterMat = new THREE.MeshStandardMaterial({
-      color: 0xf5f0eb,
-      roughness: 0.3,
-      metalness: 0.0,
-    });
+    console.log('🔄 Attempting to load Brian from:', url);
     
-    // Slightly warmer for skin areas
-    const skinMat = new THREE.MeshStandardMaterial({
-      color: 0xf0e4d8,
-      roughness: 0.4,
-      metalness: 0.0,
-    });
-    
-    // --- Torso ---
-    const torso = new THREE.Mesh(
-      new THREE.CylinderGeometry(w * 0.35, w * 0.25, h * 0.4, 10),
-      alabasterMat
-    );
-    torso.position.y = h * 0.55;
-    torso.castShadow = true;
-    group.add(torso);
-    
-    // --- Chest (subtle definition) ---
-    const chest = new THREE.Mesh(
-      new THREE.SphereGeometry(w * 0.28, 8, 8),
-      alabasterMat
-    );
-    chest.position.set(0, h * 0.62, w * 0.05);
-    chest.scale.set(1, 0.6, 0.3);
-    group.add(chest);
-    
-    // --- Neck ---
-    const neck = new THREE.Mesh(
-      new THREE.CylinderGeometry(w * 0.1, w * 0.13, h * 0.06, 8),
-      skinMat
-    );
-    neck.position.y = h * 0.78;
-    group.add(neck);
-    
-    // --- Head ---
-    const headR = h * 0.07;
-    const head = new THREE.Mesh(
-      new THREE.SphereGeometry(headR, 16, 14),
-      skinMat
-    );
-    head.position.y = h * 0.92;
-    head.castShadow = true;
-    group.add(head);
-    
-    // --- Nose (small bump) ---
-    const nose = new THREE.Mesh(
-      new THREE.SphereGeometry(headR * 0.12, 6, 6),
-      skinMat
-    );
-    nose.position.set(0, h * 0.91, -headR * 0.9);
-    group.add(nose);
-    
-    // --- Shoulders ---
-    const shoulder = new THREE.Mesh(
-      new THREE.BoxGeometry(w * 0.65, h * 0.04, w * 0.2),
-      alabasterMat
-    );
-    shoulder.position.set(0, h * 0.76, 0);
-    group.add(shoulder);
-    
-    // --- Arms (relaxed at sides) ---
-    const armH = h * 0.32;
-    const armR = w * 0.055;
-    [-1, 1].forEach(side => {
-      // Upper arm
-      const arm = new THREE.Mesh(
-        new THREE.CylinderGeometry(armR, armR * 0.8, armH, 8),
-        skinMat
-      );
-      arm.position.set(side * (w * 0.42), h * 0.62, 0);
-      arm.rotation.z = side * 0.25;
-      arm.rotation.x = -0.05;
-      arm.castShadow = true;
-      group.add(arm);
+    try {
+      const gltf = await new Promise((resolve, reject) => {
+        loader.load(url, resolve, undefined, reject);
+      });
       
-      // Forearm
-      const foreArm = new THREE.Mesh(
-        new THREE.CylinderGeometry(armR * 0.8, armR * 0.6, armH * 0.7, 8),
-        skinMat
-      );
-      foreArm.position.set(side * (w * 0.44), h * 0.42, 0);
-      foreArm.rotation.z = side * 0.15;
-      foreArm.castShadow = true;
-      group.add(foreArm);
+      console.log('✅ GLTF loaded successfully!');
+      const model = gltf.scene;
       
-      // Hand
-      const hand = new THREE.Mesh(
-        new THREE.SphereGeometry(armR * 0.7, 6, 6),
-        skinMat
-      );
-      hand.position.set(side * (w * 0.45), h * 0.34, 0);
-      group.add(hand);
-    });
-    
-    // --- Pelvis ---
-    const pelvis = new THREE.Mesh(
-      new THREE.CylinderGeometry(w * 0.3, w * 0.32, h * 0.05, 8),
-      alabasterMat
-    );
-    pelvis.position.set(0, h * 0.38, 0);
-    group.add(pelvis);
-    
-    // --- Legs ---
-    const legH = h * 0.32;
-    const legR = w * 0.085;
-    [-1, 1].forEach(side => {
-      // Upper leg
-      const leg = new THREE.Mesh(
-        new THREE.CylinderGeometry(legR, legR * 0.85, legH, 8),
-        alabasterMat
-      );
-      leg.position.set(side * (w * 0.16), h * 0.22, 0);
-      leg.castShadow = true;
-      group.add(leg);
+      // Scale Brian
+      const scaleFactor = 0.017;
+      model.scale.set(scaleFactor, scaleFactor, scaleFactor);
       
-      // Lower leg
-      const lowerLeg = new THREE.Mesh(
-        new THREE.CylinderGeometry(legR * 0.85, legR * 0.7, legH * 0.8, 8),
-        alabasterMat
-      );
-      lowerLeg.position.set(side * (w * 0.16), h * 0.07, 0);
-      lowerLeg.castShadow = true;
-      group.add(lowerLeg);
+      // Position feet on ground
+      const box = new THREE.Box3().setFromObject(model);
+      const center = box.getCenter(new THREE.Vector3());
+      const size = box.getSize(new THREE.Vector3());
+      model.position.y = -center.y + (size.y / 2);
       
-      // Foot
-      const foot = new THREE.Mesh(
-        new THREE.BoxGeometry(legR * 1.1, h * 0.03, legR * 1.8),
-        alabasterMat
-      );
-      foot.position.set(side * (w * 0.16), 0.015, legR * 0.2);
-      foot.castShadow = true;
-      group.add(foot);
-    });
-    
-    return group;
+      // Apply alabaster material
+      const alabasterMat = new THREE.MeshStandardMaterial({
+        color: 0xf5f0eb,
+        roughness: 0.4,
+        metalness: 0.0,
+        emissive: new THREE.Color(0x222222),
+        emissiveIntensity: 0.05,
+      });
+      
+      model.traverse((child) => {
+        if (child.isMesh) {
+          child.material = alabasterMat.clone();
+          child.castShadow = true;
+          child.receiveShadow = true;
+        }
+      });
+      
+      console.log('✅ Brian is ready!');
+      return model;
+    } catch (err) {
+      console.error('❌ Brian failed to load:', err);
+      console.error('Make sure brian.glb is in the same folder as index.html');
+      return null;
+    }
   }
+
+  // Try to load Brian
+  const brianModel = await loadBrianModel();
 
   const actorMeshes = new Map();
   const propMeshes = new Map();
 
   function syncItems() {
     const liveIds = new Set(state.items.map(i => i.id));
-    actorMeshes.forEach((mesh, id) => { if (!liveIds.has(id)) { scene.remove(mesh); actorMeshes.delete(id); } });
-    propMeshes.forEach((mesh, id) => { if (!liveIds.has(id)) { scene.remove(mesh); propMeshes.delete(id); } });
+    
+    actorMeshes.forEach((mesh, id) => { 
+      if (!liveIds.has(id)) { 
+        scene.remove(mesh); 
+        actorMeshes.delete(id); 
+      } 
+    });
+    
+    propMeshes.forEach((mesh, id) => { 
+      if (!liveIds.has(id)) { 
+        scene.remove(mesh); 
+        propMeshes.delete(id); 
+      } 
+    });
 
     state.items.forEach(it => {
       if (it.type === 'actor') {
         let g = actorMeshes.get(it.id);
+        
         if (!g) {
-          g = buildHumanMannequin(it);
+          if (brianModel) {
+            // Use Brian
+            g = brianModel.clone();
+            console.log('✅ Brian clone created for actor', it.id);
+          } else {
+            // NO FALLBACK — just skip this actor
+            console.warn('⚠️ No Brian model available — actor', it.id, 'not rendered');
+            return;
+          }
           scene.add(g);
           actorMeshes.set(it.id, g);
         }
         
-        // Position at the actor's location
-        const pos = worldToThree(it.x, it.y, 0);
-        g.position.copy(pos);
-        
-        // Face the correct direction
-        const facingRad = it.facing * state.D2R;
-        const lookTarget = worldToThree(it.x + Math.cos(facingRad), it.y + Math.sin(facingRad), 0);
-        g.lookAt(lookTarget.x, g.position.y, lookTarget.z);
+        if (g) {
+          const pos = worldToThree(it.x, it.y, 0);
+          g.position.copy(pos);
+          
+          const facingRad = it.facing * state.D2R;
+          const lookTarget = worldToThree(it.x + Math.cos(facingRad), it.y + Math.sin(facingRad), 0);
+          g.lookAt(lookTarget.x, g.position.y, lookTarget.z);
+        }
       } else {
         let m = propMeshes.get(it.id);
         if (!m) {
