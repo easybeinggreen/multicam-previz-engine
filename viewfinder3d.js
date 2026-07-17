@@ -29,6 +29,7 @@ async function init3D() {
   try {
     renderer = new THREE.WebGLRenderer({ canvas: canvas3d, antialias: true });
     renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   } catch (err) {
     console.warn('3D viewfinder unavailable — WebGL could not initialise. Staying on 2D.', err);
     return;
@@ -36,75 +37,149 @@ async function init3D() {
 
   const state = window.PrevizState;
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xffffff);
+  // Paler background — light warm grey instead of pure white
+  scene.background = new THREE.Color(0xf5f0eb);
   const camera = new THREE.PerspectiveCamera(50, 16 / 9, 0.1, 200);
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-  const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+  // Softer lighting for more human look
+  const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+  scene.add(ambient);
+
+  const sun = new THREE.DirectionalLight(0xffeedd, 0.9);
   sun.position.set(8, 20, 8);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(1024, 1024);
+  sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.left = -22; sun.shadow.camera.right = 22;
   sun.shadow.camera.top = 22; sun.shadow.camera.bottom = -22;
   sun.shadow.camera.near = 0.5; sun.shadow.camera.far = 60;
   scene.add(sun);
 
+  // Fill light from opposite side
+  const fill = new THREE.DirectionalLight(0xccddff, 0.3);
+  fill.position.set(-5, 10, -8);
+  scene.add(fill);
+
+  // Ground with subtle color
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(80, 80),
-    new THREE.MeshStandardMaterial({ color: 0xf1f1f3 })
+    new THREE.MeshStandardMaterial({ color: 0xe8e4df, roughness: 0.8 })
   );
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
   scene.add(ground);
 
-  // Vignette wall panels
+  // Vignette wall panels — paler purple
   Object.entries(state.V).forEach(([name, ang]) => {
     const rad = ang * state.D2R;
     const center = state.pt(ang, state.R_VIGNETTE);
     const geo = new THREE.PlaneGeometry(state.VIGNETTE_WIDTH_M, state.VIGNETTE_HEIGHT_M);
-    const mat = new THREE.MeshStandardMaterial({ color: 0x8f84e8, side: THREE.DoubleSide });
+    const mat = new THREE.MeshStandardMaterial({ 
+      color: 0xcdc4e8,  // Paler purple
+      side: THREE.DoubleSide,
+      roughness: 0.6,
+      metalness: 0.1
+    });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.copy(worldToThree(THREE, center.x, center.y, state.VIGNETTE_HEIGHT_M / 2));
-    // Look at a point further outward (away from room centre) so the panel's
-    // front face ends up facing inward, toward the audience/cameras.
     const outward = worldToThree(THREE, center.x + Math.cos(rad) * 5, center.y + Math.sin(rad) * 5, state.VIGNETTE_HEIGHT_M / 2);
     mesh.lookAt(outward);
     mesh.receiveShadow = true;
     scene.add(mesh);
   });
 
+  // --- Build a more human-like mannequin ---
   function buildMannequin(it) {
     const g = new THREE.Group();
-    const bodyMat = new THREE.MeshStandardMaterial({ color: it.color });
-    const skinMat = new THREE.MeshStandardMaterial({ color: 0xf2d3ae });
+    
+    // Skin and clothing colors
+    const skinColor = 0xf5d6c6;
+    const shirtColor = it.color || 0x4a90d9;
+    const pantsColor = 0x3d3d3d;
+    const shoeColor = 0x2a2a2a;
+    
+    const skinMat = new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.7 });
+    const shirtMat = new THREE.MeshStandardMaterial({ color: shirtColor, roughness: 0.8 });
+    const pantsMat = new THREE.MeshStandardMaterial({ color: pantsColor, roughness: 0.9 });
+    const shoeMat = new THREE.MeshStandardMaterial({ color: shoeColor, roughness: 0.9 });
 
-    const torsoH = it.h * 0.45;
-    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(it.w / 2.4, torsoH, 4, 8), bodyMat);
-    torso.position.y = it.h * 0.55;
+    const h = it.h;
+    const w = it.w;
+    
+    // --- Torso (with shirt) ---
+    const torsoGeo = new THREE.CylinderGeometry(w * 0.35, w * 0.28, h * 0.45, 8);
+    const torso = new THREE.Mesh(torsoGeo, shirtMat);
+    torso.position.y = h * 0.55;
     torso.castShadow = true;
     g.add(torso);
 
-    const headR = it.h / 15;
+    // --- Head (with neck) ---
+    const headR = h / 13;
     const head = new THREE.Mesh(new THREE.SphereGeometry(headR, 16, 12), skinMat);
-    head.position.y = it.h - headR;
+    head.position.y = h - headR * 0.9;
     head.castShadow = true;
     g.add(head);
-    // Nose bump at local -Z, our defined "front" before facing rotation
-    const nose = new THREE.Mesh(new THREE.SphereGeometry(headR * 0.18, 8, 8), skinMat);
-    nose.position.set(0, it.h - headR, -headR * 0.9);
+
+    // --- Neck ---
+    const neck = new THREE.Mesh(
+      new THREE.CylinderGeometry(headR * 0.5, headR * 0.6, h * 0.06, 8),
+      skinMat
+    );
+    neck.position.y = h * 0.78;
+    g.add(neck);
+
+    // --- Simple face features ---
+    // Nose (small bump)
+    const nose = new THREE.Mesh(
+      new THREE.SphereGeometry(headR * 0.12, 6, 6),
+      new THREE.MeshStandardMaterial({ color: 0xe8c4a8, roughness: 0.9 })
+    );
+    nose.position.set(0, h - headR * 0.7, -headR * 0.9);
     g.add(nose);
 
-    const legH = it.h * 0.45;
+    // --- Legs (with pants) ---
+    const legH = h * 0.4;
+    const legR = w * 0.1;
     [-1, 1].forEach(side => {
-      const leg = new THREE.Mesh(new THREE.CapsuleGeometry(it.w * 0.14, legH, 4, 8), bodyMat);
-      leg.position.set(side * it.w * 0.18, legH / 2, 0);
+      const leg = new THREE.Mesh(
+        new THREE.CylinderGeometry(legR, legR * 0.85, legH, 8),
+        pantsMat
+      );
+      leg.position.set(side * w * 0.15, legH / 2, 0);
       leg.castShadow = true;
       g.add(leg);
-      const arm = new THREE.Mesh(new THREE.CapsuleGeometry(it.w * 0.11, torsoH * 0.85, 4, 8), bodyMat);
-      arm.position.set(side * (it.w / 2 + it.w * 0.12), it.h * 0.55, 0);
+      
+      // Shoes
+      const shoe = new THREE.Mesh(
+        new THREE.BoxGeometry(legR * 1.3, h * 0.04, legR * 2.2),
+        shoeMat
+      );
+      shoe.position.set(side * w * 0.15, 0.02, legR * 0.3);
+      shoe.castShadow = true;
+      g.add(shoe);
+    });
+
+    // --- Arms ---
+    const armH = h * 0.38;
+    const armR = w * 0.06;
+    [-1, 1].forEach(side => {
+      const arm = new THREE.Mesh(
+        new THREE.CylinderGeometry(armR, armR * 0.8, armH, 8),
+        skinMat
+      );
+      arm.position.set(side * w * 0.48, h * 0.65, 0);
+      arm.rotation.z = side * 0.15;
       arm.castShadow = true;
       g.add(arm);
     });
+
+    // --- Shoulders (subtle) ---
+    const shoulder = new THREE.Mesh(
+      new THREE.BoxGeometry(w * 0.6, h * 0.04, w * 0.2),
+      shirtMat
+    );
+    shoulder.position.set(0, h * 0.78, 0);
+    g.add(shoulder);
+
     return g;
   }
 
@@ -129,7 +204,7 @@ async function init3D() {
         let m = propMeshes.get(it.id);
         if (!m) {
           const geo = new THREE.BoxGeometry(it.w, it.h, it.w * 0.7);
-          const mat = new THREE.MeshStandardMaterial({ color: it.color });
+          const mat = new THREE.MeshStandardMaterial({ color: it.color, roughness: 0.7 });
           m = new THREE.Mesh(geo, mat);
           m.castShadow = true; m.receiveShadow = true;
           scene.add(m); propMeshes.set(it.id, m);
@@ -170,7 +245,6 @@ async function init3D() {
   };
 
   // Initialisation succeeded — enable the toggle and switch to 3D by default
-  // Define the onchange handler first
   const toggleChangeHandler = () => {
     const use3d = toggle.checked;
     canvas2d.style.display = use3d ? 'none' : 'block';
@@ -184,17 +258,12 @@ async function init3D() {
   toggle.disabled = false;
   toggle.checked = true;
   
-  // Manually show 3D canvas and render
   canvas2d.style.display = 'none';
   canvas3d.style.display = 'block';
   
-  // Small delay to ensure the canvas is visible before rendering
   setTimeout(() => {
     window.Previz3DRender();
   }, 50);
 }
 
-// Module scripts execute after deferred/classic scripts have already run, so
-// PrevizState usually already exists by the time we get here — but listen
-// for the ready event too, in case script execution order ever changes.
 if (window.PrevizState) { init3D(); } else { window.addEventListener('previz-ready', init3D); }
