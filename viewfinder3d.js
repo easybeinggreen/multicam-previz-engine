@@ -89,7 +89,7 @@ async function init3D() {
     scene.add(mesh);
   });
 
-  // --- SAFE Brian loader: extract geometries only ---
+  // --- SAFE Brian loader: extract geometries and strip skinning ---
   async function loadBrianModel() {
     const loader = new GLTFLoader();
     const url = './brian.glb';
@@ -110,19 +110,9 @@ async function init3D() {
         console.log(`  ${type} "${name}" pos(${pos})`);
       });
 
-      // --- Build a new static group by extracting mesh geometry ---
+      // --- Build a new static group by extracting geometry and stripping skinning ---
       const staticGroup = new THREE.Group();
       staticGroup.name = 'BrianStatic';
-
-      // Collect all mesh geometries and materials
-      const meshes = [];
-      original.traverse((child) => {
-        if (child.isMesh || child.isSkinnedMesh) {
-          meshes.push(child);
-        }
-      });
-
-      console.log(`📦 Found ${meshes.length} meshes. Creating static copies...`);
 
       const alabasterMat = new THREE.MeshStandardMaterial({
         color: 0xf5f0eb,
@@ -132,13 +122,35 @@ async function init3D() {
         emissiveIntensity: 0.05,
       });
 
+      // Collect all meshes (including SkinnedMesh)
+      const meshes = [];
+      original.traverse((child) => {
+        if (child.isMesh || child.isSkinnedMesh) {
+          meshes.push(child);
+        }
+      });
+
+      console.log(`📦 Found ${meshes.length} meshes. Creating static copies without skinning...`);
+
       meshes.forEach((srcMesh) => {
-        // Clone geometry (to avoid sharing issues)
+        // Clone the geometry
         const geo = srcMesh.geometry.clone();
-        // Use alabaster material
+        
+        // --- CRITICAL: Remove skinning attributes to prevent Three.js from treating this as skinned ---
+        if (geo.attributes.skinIndex) geo.deleteAttribute('skinIndex');
+        if (geo.attributes.skinWeight) geo.deleteAttribute('skinWeight');
+        // Also remove any morph attributes if present (optional)
+        if (geo.morphAttributes) {
+          for (const key in geo.morphAttributes) {
+            delete geo.morphAttributes[key];
+          }
+        }
+        // Ensure the geometry is not seen as skinned
+        geo.isSkinnedMesh = false;
+
+        // Create a regular Mesh (not SkinnedMesh) with the cleaned geometry
         const mat = alabasterMat.clone();
         const newMesh = new THREE.Mesh(geo, mat);
-        // Set local transform to identity – we will position the whole group
         newMesh.position.set(0, 0, 0);
         newMesh.rotation.set(0, 0, 0);
         newMesh.scale.set(1, 1, 1);
@@ -151,14 +163,11 @@ async function init3D() {
       const scaleFactor = 0.017;
       staticGroup.scale.set(scaleFactor, scaleFactor, scaleFactor);
 
-      // Optional: center the model by computing bounding box and shifting the group
-      // We'll just keep it as-is, assuming the original was centered.
-
-      console.log('✅ Static Brian model built successfully!');
+      // Optional: center the model (skip for now, assume it's centered)
+      console.log('✅ Static Brian model built successfully (skinning stripped)!');
       return staticGroup;
     } catch (err) {
       console.error('❌ Brian failed to load:', err);
-      // Return null – we'll fallback to just red spheres
       return null;
     }
   }
@@ -197,7 +206,7 @@ async function init3D() {
             actorMeshes.set(it.id, g);
             console.log(`✅ Brian static clone created for actor ${it.id}`);
           } else {
-            // No Brian model – we'll just render a colored box as fallback
+            // Fallback: colored box
             console.warn(`⚠️ No Brian model – using fallback box for actor ${it.id}`);
             const geo = new THREE.BoxGeometry(0.6, 1.8, 0.4);
             const mat = new THREE.MeshStandardMaterial({ color: 0x8888ff });
@@ -225,7 +234,6 @@ async function init3D() {
         } else if (brianModel) {
           g.scale.set(0.017, 0.017, 0.017);
         } else {
-          // fallback box – keep normal scale
           g.scale.set(1, 1, 1);
         }
 
@@ -290,14 +298,13 @@ async function init3D() {
       const ctxLost = renderer.getContext().isContextLost();
       if (ctxLost) {
         console.warn('⚠️ WebGL context lost!');
-        // Don't disable, just skip render
         return;
       }
       
       renderer.render(scene, camera);
     } catch (err) {
       console.error('❌ Render error:', err);
-      // Don't disable; just log and continue
+      // Do NOT disable 3D – just log and continue
     }
   };
 
