@@ -134,8 +134,20 @@ async function init3D() {
 
   function syncItems() {
     const liveIds = new Set(state.items.map(i => i.id));
-    actorMeshes.forEach((mesh, id) => { if (!liveIds.has(id)) { scene.remove(mesh); actorMeshes.delete(id); } });
-    propMeshes.forEach((mesh, id) => { if (!liveIds.has(id)) { scene.remove(mesh); propMeshes.delete(id); } });
+    
+    // Clean up removed items (including debug spheres)
+    actorMeshes.forEach((mesh, id) => {
+      if (!liveIds.has(id) && !id.toString().endsWith('_debug')) {
+        scene.remove(mesh);
+        actorMeshes.delete(id);
+      }
+    });
+    propMeshes.forEach((mesh, id) => {
+      if (!liveIds.has(id)) {
+        scene.remove(mesh);
+        propMeshes.delete(id);
+      }
+    });
 
     state.items.forEach(it => {
       if (it.type === 'actor') {
@@ -143,43 +155,99 @@ async function init3D() {
         if (!g) {
           if (brianModel) {
             g = brianModel.clone();
-            console.log('✅ Brian clone created for actor', it.id);
+            // Reset any baked transforms from the GLTF
+            g.matrix.identity();
+            g.matrixAutoUpdate = true;
+            g.position.set(0, 0, 0);
+            g.rotation.set(0, 0, 0);
+            g.scale.set(1, 1, 1);
+            g.userData.isBrian = true;
+            g.userData.actorId = it.id;
+            scene.add(g);
+            actorMeshes.set(it.id, g);
+            console.log(`✅ Brian clone created for actor ${it.id}`);
+            
+            // Log the model structure to inspect hierarchy
+            console.log(`🔍 Model structure for actor ${it.id}:`);
+            g.traverse((child) => {
+              if (child.isMesh) {
+                console.log(`  - Mesh: ${child.name || 'unnamed'}`, child.position);
+              }
+            });
           } else {
-            console.warn('⚠️ No Brian model available — actor', it.id, 'not rendered');
+            console.warn(`⚠️ No Brian model – actor ${it.id} not rendered`);
             return;
           }
+        }
+
+        // Apply position
+        const pos = worldToThree(it.x, it.y, 0);
+        g.position.copy(pos);
+
+        // Apply rotation (facing)
+        // Note: Three.js uses Y-up, our world is Z-up, so we need to map facing correctly
+        // The model's forward axis might be +Z or -Z depending on export
+        const facingRad = it.facing * state.D2R;
+        // Try rotating around Y (up in Three.js) which maps to our Z-up world
+        g.rotation.y = -facingRad + Math.PI / 2; // Adjust offset as needed
+
+        // Force matrix update
+        g.updateMatrixWorld(true);
+
+        // --- DEBUG: Red sphere at actor position ---
+        let debugSphere = actorMeshes.get(it.id + '_debug');
+        if (!debugSphere) {
+          const sphereGeo = new THREE.SphereGeometry(0.3, 8, 8);
+          const sphereMat = new THREE.MeshStandardMaterial({ 
+            color: 0xff0000,
+            emissive: 0xff0000,
+            emissiveIntensity: 0.3
+          });
+          debugSphere = new THREE.Mesh(sphereGeo, sphereMat);
+          debugSphere.castShadow = true;
+          scene.add(debugSphere);
+          actorMeshes.set(it.id + '_debug', debugSphere);
+        }
+        debugSphere.position.copy(pos);
+
+        // --- TEST: Make lead actor (id 1) obviously different ---
+        if (it.id === 1) {
+          g.scale.set(0.017 * 3, 0.017 * 3, 0.017 * 3); // 3x size
+          g.rotation.y += 0.05; // Continuous spin (will accumulate each frame!)
+        } else {
+          g.scale.set(0.017, 0.017, 0.017); // Normal size
+        }
+
+        console.log(`[sync] Actor ${it.id} at (${it.x.toFixed(2)}, ${it.y.toFixed(2)}) → mesh pos (${g.position.x.toFixed(2)}, ${g.position.y.toFixed(2)}, ${g.position.z.toFixed(2)}) scale ${g.scale.x.toFixed(3)}`);
+        
+        // Verify the mesh is actually in the scene
+        let foundInScene = false;
+        scene.children.forEach(child => {
+          if (child === g) foundInScene = true;
+        });
+        if (!foundInScene) {
+          console.error(`⚠️ Actor ${it.id} mesh is NOT in the scene! Re-adding...`);
           scene.add(g);
-          actorMeshes.set(it.id, g);
         }
-        if (g) {
-          const pos = worldToThree(it.x, it.y, 0);
-          g.position.copy(pos);
-
-          // TEMP UNMISSABLE TEST — Lead actor (id 1) only: spins continuously and is 3x size.
-          // If this is the Brian you see on screen, you cannot miss this. Remove once confirmed.
-          if (it.id === 1) {
-            g.rotation.y += 0.08;
-            g.scale.setScalar(0.017 * 3);
-          }
-
-          console.log('[sync]', it.id, 'data:', it.x.toFixed(2), it.y.toFixed(2), '→ mesh:', g.position.x.toFixed(2), g.position.y.toFixed(2), g.position.z.toFixed(2));
-
-          const facingRad = it.facing * state.D2R;
-          const lookTarget = worldToThree(it.x + Math.cos(facingRad), it.y + Math.sin(facingRad), 0);
-          g.lookAt(lookTarget.x, g.position.y, lookTarget.z);
-        }
+        
       } else {
+        // Props
         let m = propMeshes.get(it.id);
         if (!m) {
           const geo = new THREE.BoxGeometry(it.w, it.h, it.w * 0.7);
           const mat = new THREE.MeshStandardMaterial({ color: it.color, roughness: 0.7 });
           m = new THREE.Mesh(geo, mat);
-          m.castShadow = true; m.receiveShadow = true;
-          scene.add(m); propMeshes.set(it.id, m);
+          m.castShadow = true;
+          m.receiveShadow = true;
+          scene.add(m);
+          propMeshes.set(it.id, m);
         }
         m.position.copy(worldToThree(it.x, it.y, it.h / 2));
       }
     });
+    
+    // Log total scene children count for debugging
+    console.log(`📊 Scene has ${scene.children.length} children (${actorMeshes.size} actor meshes, ${propMeshes.size} prop meshes)`);
   }
 
   function resize() {
@@ -201,8 +269,19 @@ async function init3D() {
     camera.position.copy(worldToThree(cam.x, cam.y, cam.z));
     camera.lookAt(worldToThree(cam.aimX, cam.aimY, cam.aimZ));
     syncItems();
+    
+    // Check context status
+    const ctxLost = renderer.getContext().isContextLost();
+    if (ctxLost) {
+      console.warn('⚠️ WebGL context is lost!');
+      toggle.checked = false;
+      if (toggle.onchange) toggle.onchange();
+      toggle.disabled = true;
+      window.Previz3DRender = null;
+      return;
+    }
+    
     try {
-      console.log('ctxLost:', renderer.getContext().isContextLost());
       renderer.render(scene, camera);
     } catch (err) {
       console.warn('3D render failed at runtime — switching back to 2D.', err);
@@ -215,7 +294,9 @@ async function init3D() {
 
   let use3dActive = true;
   function frameLoop() {
-    if (use3dActive && window.Previz3DRender) window.Previz3DRender();
+    if (use3dActive && window.Previz3DRender) {
+      window.Previz3DRender();
+    }
     requestAnimationFrame(frameLoop);
   }
 
@@ -223,6 +304,10 @@ async function init3D() {
     use3dActive = toggle.checked;
     canvas2d.style.display = use3dActive ? 'none' : 'block';
     canvas3d.style.display = use3dActive ? 'block' : 'none';
+    if (use3dActive) {
+      // Force a render when switching back to 3D
+      if (window.Previz3DRender) window.Previz3DRender();
+    }
   };
 
   toggle.onchange = toggleChangeHandler;
@@ -231,7 +316,22 @@ async function init3D() {
   canvas2d.style.display = 'none';
   canvas3d.style.display = 'block';
 
+  // Initial sync
+  syncItems();
+  
+  // Start the render loop
   requestAnimationFrame(frameLoop);
+  
+  // Also trigger render on any state change from the main app
+  const origRender = window.Previz3DRender;
+  window.Previz3DRender = function() {
+    if (origRender) origRender();
+  };
 }
 
-init3D();
+// Wait for the main app to signal it's ready
+if (window.PrevizState) {
+  init3D();
+} else {
+  window.addEventListener('previz-ready', init3D);
+}
