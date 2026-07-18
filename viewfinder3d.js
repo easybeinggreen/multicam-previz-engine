@@ -87,6 +87,7 @@ async function init3D() {
     scene.add(mesh);
   });
 
+  // --- Brian loader with aggressive flattening ---
   async function loadBrianModel() {
     const loader = new GLTFLoader();
     const url = './brian.glb';
@@ -96,51 +97,96 @@ async function init3D() {
         loader.load(url, resolve, undefined, reject);
       });
       console.log('✅ GLTF loaded successfully!');
-      const model = gltf.scene;
+      const original = gltf.scene;
       
-      // --- CRITICAL: Disable all animations ---
-      if (gltf.animations && gltf.animations.length > 0) {
-        console.log(`🎬 Found ${gltf.animations.length} animations - disabling them`);
-        gltf.animations = []; // Remove all animations
-      }
-      
-      // Stop any existing animation mixer (if any)
-      if (window._mixer) {
-        window._mixer.stopAllAction();
-        window._mixer = null;
-      }
+      // --- Dump structure to see what we're dealing with ---
+      console.log('🔍 Full hierarchy of loaded Brian:');
+      original.traverse((child) => {
+        const type = child.type;
+        const name = child.name || 'unnamed';
+        const pos = child.position.toArray().map(v => v.toFixed(3)).join(',');
+        console.log(`  ${type} "${name}" pos(${pos})`);
+      });
 
-      // --- CRITICAL: Reset all bone transforms to identity ---
-      model.traverse((child) => {
-        if (child.isBone) {
-          child.position.set(0, 0, 0);
-          child.rotation.set(0, 0, 0);
-          child.scale.set(1, 1, 1);
-          child.updateMatrixWorld(true);
+      // --- 1. Remove all animations ---
+      if (gltf.animations) gltf.animations.length = 0;
+      
+      // --- 2. Create a new empty group as our clean root ---
+      const cleanRoot = new THREE.Group();
+      cleanRoot.name = 'BrianCleanRoot';
+      
+      // --- 3. Find all meshes (including skinned meshes) and detach them from their parents ---
+      const meshes = [];
+      original.traverse((child) => {
+        if (child.isMesh || child.isSkinnedMesh) {
+          meshes.push(child);
         }
-        if (child.isSkinnedMesh) {
-          // Reset bind matrix
-          child.bindMatrix.identity();
-          child.bindMatrixInverse.identity();
-          if (child.skeleton) {
-            child.skeleton.bones.forEach(bone => {
-              bone.position.set(0, 0, 0);
-              bone.rotation.set(0, 0, 0);
-              bone.scale.set(1, 1, 1);
-            });
+      });
+      
+      console.log(`📦 Found ${meshes.length} meshes. Reparenting them to clean root...`);
+      
+      meshes.forEach((mesh) => {
+        // Detach from current parent (if any)
+        const parent = mesh.parent;
+        if (parent) {
+          // Remove from parent but keep world transform
+          // We want the mesh to be a direct child of cleanRoot with zero local transform.
+          // So we temporarily store its world position, then reset local.
+          const worldPos = new THREE.Vector3();
+          mesh.getWorldPosition(worldPos);
+          
+          // Remove from parent
+          parent.remove(mesh);
+          
+          // Add to cleanRoot
+          cleanRoot.add(mesh);
+          
+          // Reset local transform to identity
+          mesh.position.set(0, 0, 0);
+          mesh.rotation.set(0, 0, 0);
+          mesh.scale.set(1, 1, 1);
+          mesh.matrix.identity();
+          mesh.matrixAutoUpdate = true;
+          
+          // Now we will move the whole cleanRoot to the world position of the mesh later.
+          // But we need to also store the mesh's geometry offset? For now, we assume the mesh
+          // geometry is centered at origin, so setting local (0,0,0) places it at the root's position.
+          // That is what we want.
+          
+          // However, if the mesh had a position offset originally (e.g., the model is not centered),
+          // we might need to keep that offset. But since we are moving the root, we can just set
+          // the mesh's local position to (0,0,0) and rely on the root to position it.
+          // But if the mesh was originally at (x,y,z) relative to its parent, that offset is lost.
+          // Better: we can record the mesh's local position relative to the original root
+          // and then apply it as an offset to the mesh's local position after reparenting.
+          // However, we want the mesh to be at the root's position, so local (0,0,0) is correct
+          // if the mesh geometry is centered at origin.
+          // If not, we can adjust by offset.
+          // Let's just keep (0,0,0) for now and see.
+          
+          // Also remove any skeleton/bones references to avoid skinning
+          if (mesh.isSkinnedMesh) {
+            mesh.skeleton = null;
+            mesh.bindMatrix.identity();
+            mesh.bindMatrixInverse.identity();
+          }
+          // Remove morph targets
+          if (mesh.morphTargetInfluences) {
+            mesh.morphTargetInfluences.length = 0;
           }
         }
       });
-
-      // Apply base scale and centering
-      const scaleFactor = 0.017;
-      model.scale.set(scaleFactor, scaleFactor, scaleFactor);
-      const box = new THREE.Box3().setFromObject(model);
-      const center = box.getCenter(new THREE.Vector3());
-      const size = box.getSize(new THREE.Vector3());
-      model.position.y = -center.y + (size.y / 2);
       
-      // Apply alabaster material
+      // --- 4. Apply base scale to the cleanRoot (so all meshes inherit scale) ---
+      const scaleFactor = 0.017;
+      cleanRoot.scale.set(scaleFactor, scaleFactor, scaleFactor);
+      
+      // --- 5. Center the model (optional) - we'll just center the root's position later ---
+      // We can compute the bounding box of all meshes and shift the root so that the model is centered.
+      // But since we want the actor's position to be where the model's feet are, we'll just use
+      // the position from the original model's centering, if any. We'll skip for now.
+      
+      // --- 6. Apply the alabaster material ---
       const alabasterMat = new THREE.MeshStandardMaterial({
         color: 0xf5f0eb,
         roughness: 0.4,
@@ -149,20 +195,16 @@ async function init3D() {
         emissiveIntensity: 0.05,
       });
       
-      model.traverse((child) => {
+      cleanRoot.traverse((child) => {
         if (child.isMesh) {
           child.material = alabasterMat.clone();
           child.castShadow = true;
           child.receiveShadow = true;
-          // Remove morph targets that might affect position
-          if (child.morphTargetInfluences) {
-            child.morphTargetInfluences = [];
-          }
         }
       });
       
-      console.log('✅ Brian is ready with all animations/transforms disabled!');
-      return model;
+      console.log('✅ Brian is now flattened and ready!');
+      return cleanRoot;
     } catch (err) {
       console.error('❌ Brian failed to load:', err);
       console.error('Make sure brian.glb is in the same folder as index.html');
@@ -198,83 +240,35 @@ async function init3D() {
         let g = actorMeshes.get(it.id);
         if (!g) {
           if (brianModel) {
-            // --- Deep clone to get a fresh copy ---
+            // Clone the flattened model
             g = brianModel.clone(true);
-            
-            // --- Strip any leftover animation state ---
             g.userData = { isBrian: true, actorId: it.id };
-            
-            // --- Reset every node's local transform to identity ---
-            g.traverse((child) => {
-              child.position.set(0, 0, 0);
-              child.rotation.set(0, 0, 0);
-              child.scale.set(1, 1, 1);
-              if (child.isSkinnedMesh) {
-                child.bindMatrix.identity();
-                child.bindMatrixInverse.identity();
-                if (child.skeleton) {
-                  child.skeleton.bones.forEach(bone => {
-                    bone.position.set(0, 0, 0);
-                    bone.rotation.set(0, 0, 0);
-                    bone.scale.set(1, 1, 1);
-                  });
-                }
-              }
-              child.updateMatrixWorld(true);
-            });
-            
-            // Reset root
-            g.position.set(0, 0, 0);
-            g.rotation.set(0, 0, 0);
-            g.scale.set(1, 1, 1);
-            g.matrix.identity();
-            g.matrixAutoUpdate = true;
-            
             scene.add(g);
             actorMeshes.set(it.id, g);
-            console.log(`✅ Brian clone created for actor ${it.id} with animations/transforms cleared`);
-            
-            // Log hierarchy to debug
-            console.log(`🔍 Model structure for actor ${it.id}:`);
-            g.traverse((child) => {
-              if (child.isMesh || child.isSkinnedMesh) {
-                console.log(`  - ${child.type}: ${child.name || 'unnamed'}`, child.position);
-              }
-            });
+            console.log(`✅ Flattened Brian clone created for actor ${it.id}`);
           } else {
             console.warn(`⚠️ No Brian model – actor ${it.id} not rendered`);
             return;
           }
         }
 
-        // --- Now apply the actor's world position to the root ---
+        // --- Now move the root to the actor's world position ---
         const pos = worldToThree(it.x, it.y, 0);
         g.position.copy(pos);
 
-        // --- Force all child meshes to local (0,0,0) so they follow root exactly ---
-        g.traverse((child) => {
-          if (child.isMesh || child.isSkinnedMesh) {
-            child.position.set(0, 0, 0);
-            child.rotation.set(0, 0, 0);
-            child.scale.set(1, 1, 1);
-            child.updateMatrixWorld(true);
-          }
-        });
-
         // --- Apply rotation (facing) to root ---
         const facingRad = it.facing * state.D2R;
-        g.rotation.y = -facingRad + Math.PI / 2; // Adjust offset if needed
+        g.rotation.y = -facingRad + Math.PI / 2;
 
-        // --- Scale: make lead actor bigger and spinning for easy visual confirmation ---
+        // --- Scale: make lead actor bigger and spinning ---
         if (it.id === 1) {
           g.scale.set(0.017 * 3, 0.017 * 3, 0.017 * 3);
-          // Spin continuously
-          g.rotation.y += 0.05;
+          g.rotation.y += 0.05; // spin
         } else {
           g.scale.set(0.017, 0.017, 0.017);
         }
 
-        // --- Force matrix update on entire hierarchy ---
+        // --- Force matrix update ---
         g.updateMatrixWorld(true);
 
         // --- DEBUG: Red sphere at actor position (already confirmed working) ---
@@ -293,7 +287,7 @@ async function init3D() {
         }
         debugSphere.position.copy(pos);
 
-        console.log(`[sync] Actor ${it.id} at (${it.x.toFixed(2)}, ${it.y.toFixed(2)}) → root pos (${g.position.x.toFixed(2)}, ${g.position.y.toFixed(2)}, ${g.position.z.toFixed(2)}) scale ${g.scale.x.toFixed(3)}`);
+        console.log(`[sync] Actor ${it.id} at (${it.x.toFixed(2)}, ${it.y.toFixed(2)}) → root pos (${g.position.x.toFixed(2)}, ${g.position.y.toFixed(2)}, ${g.position.z.toFixed(2)})`);
         
       } else {
         // Props (already working)
