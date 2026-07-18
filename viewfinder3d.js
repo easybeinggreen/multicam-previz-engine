@@ -40,6 +40,7 @@ async function init3D() {
   
   const camera = new THREE.PerspectiveCamera(50, 16 / 9, 0.1, 200);
 
+  // Lights (unchanged)
   const ambient = new THREE.AmbientLight(0xffffff, 0.5);
   scene.add(ambient);
   
@@ -69,6 +70,7 @@ async function init3D() {
   ground.receiveShadow = true;
   scene.add(ground);
 
+  // Vignettes (unchanged)
   Object.entries(state.V).forEach(([name, ang]) => {
     const rad = ang * state.D2R;
     const center = state.pt(ang, state.R_VIGNETTE);
@@ -87,7 +89,7 @@ async function init3D() {
     scene.add(mesh);
   });
 
-  // --- Brian loader with aggressive flattening ---
+  // --- SAFE Brian loader: extract geometries only ---
   async function loadBrianModel() {
     const loader = new GLTFLoader();
     const url = './brian.glb';
@@ -98,9 +100,9 @@ async function init3D() {
       });
       console.log('✅ GLTF loaded successfully!');
       const original = gltf.scene;
-      
-      // --- Dump structure to see what we're dealing with ---
-      console.log('🔍 Full hierarchy of loaded Brian:');
+
+      // Log hierarchy (for debugging)
+      console.log('🔍 Full hierarchy:');
       original.traverse((child) => {
         const type = child.type;
         const name = child.name || 'unnamed';
@@ -108,85 +110,20 @@ async function init3D() {
         console.log(`  ${type} "${name}" pos(${pos})`);
       });
 
-      // --- 1. Remove all animations ---
-      if (gltf.animations) gltf.animations.length = 0;
-      
-      // --- 2. Create a new empty group as our clean root ---
-      const cleanRoot = new THREE.Group();
-      cleanRoot.name = 'BrianCleanRoot';
-      
-      // --- 3. Find all meshes (including skinned meshes) and detach them from their parents ---
+      // --- Build a new static group by extracting mesh geometry ---
+      const staticGroup = new THREE.Group();
+      staticGroup.name = 'BrianStatic';
+
+      // Collect all mesh geometries and materials
       const meshes = [];
       original.traverse((child) => {
         if (child.isMesh || child.isSkinnedMesh) {
           meshes.push(child);
         }
       });
-      
-      console.log(`📦 Found ${meshes.length} meshes. Reparenting them to clean root...`);
-      
-      meshes.forEach((mesh) => {
-        // Detach from current parent (if any)
-        const parent = mesh.parent;
-        if (parent) {
-          // Remove from parent but keep world transform
-          // We want the mesh to be a direct child of cleanRoot with zero local transform.
-          // So we temporarily store its world position, then reset local.
-          const worldPos = new THREE.Vector3();
-          mesh.getWorldPosition(worldPos);
-          
-          // Remove from parent
-          parent.remove(mesh);
-          
-          // Add to cleanRoot
-          cleanRoot.add(mesh);
-          
-          // Reset local transform to identity
-          mesh.position.set(0, 0, 0);
-          mesh.rotation.set(0, 0, 0);
-          mesh.scale.set(1, 1, 1);
-          mesh.matrix.identity();
-          mesh.matrixAutoUpdate = true;
-          
-          // Now we will move the whole cleanRoot to the world position of the mesh later.
-          // But we need to also store the mesh's geometry offset? For now, we assume the mesh
-          // geometry is centered at origin, so setting local (0,0,0) places it at the root's position.
-          // That is what we want.
-          
-          // However, if the mesh had a position offset originally (e.g., the model is not centered),
-          // we might need to keep that offset. But since we are moving the root, we can just set
-          // the mesh's local position to (0,0,0) and rely on the root to position it.
-          // But if the mesh was originally at (x,y,z) relative to its parent, that offset is lost.
-          // Better: we can record the mesh's local position relative to the original root
-          // and then apply it as an offset to the mesh's local position after reparenting.
-          // However, we want the mesh to be at the root's position, so local (0,0,0) is correct
-          // if the mesh geometry is centered at origin.
-          // If not, we can adjust by offset.
-          // Let's just keep (0,0,0) for now and see.
-          
-          // Also remove any skeleton/bones references to avoid skinning
-          if (mesh.isSkinnedMesh) {
-            mesh.skeleton = null;
-            mesh.bindMatrix.identity();
-            mesh.bindMatrixInverse.identity();
-          }
-          // Remove morph targets
-          if (mesh.morphTargetInfluences) {
-            mesh.morphTargetInfluences.length = 0;
-          }
-        }
-      });
-      
-      // --- 4. Apply base scale to the cleanRoot (so all meshes inherit scale) ---
-      const scaleFactor = 0.017;
-      cleanRoot.scale.set(scaleFactor, scaleFactor, scaleFactor);
-      
-      // --- 5. Center the model (optional) - we'll just center the root's position later ---
-      // We can compute the bounding box of all meshes and shift the root so that the model is centered.
-      // But since we want the actor's position to be where the model's feet are, we'll just use
-      // the position from the original model's centering, if any. We'll skip for now.
-      
-      // --- 6. Apply the alabaster material ---
+
+      console.log(`📦 Found ${meshes.length} meshes. Creating static copies...`);
+
       const alabasterMat = new THREE.MeshStandardMaterial({
         color: 0xf5f0eb,
         roughness: 0.4,
@@ -194,26 +131,40 @@ async function init3D() {
         emissive: new THREE.Color(0x222222),
         emissiveIntensity: 0.05,
       });
-      
-      cleanRoot.traverse((child) => {
-        if (child.isMesh) {
-          child.material = alabasterMat.clone();
-          child.castShadow = true;
-          child.receiveShadow = true;
-        }
+
+      meshes.forEach((srcMesh) => {
+        // Clone geometry (to avoid sharing issues)
+        const geo = srcMesh.geometry.clone();
+        // Use alabaster material
+        const mat = alabasterMat.clone();
+        const newMesh = new THREE.Mesh(geo, mat);
+        // Set local transform to identity – we will position the whole group
+        newMesh.position.set(0, 0, 0);
+        newMesh.rotation.set(0, 0, 0);
+        newMesh.scale.set(1, 1, 1);
+        newMesh.castShadow = true;
+        newMesh.receiveShadow = true;
+        staticGroup.add(newMesh);
       });
-      
-      console.log('✅ Brian is now flattened and ready!');
-      return cleanRoot;
+
+      // Apply uniform scale to the entire static group
+      const scaleFactor = 0.017;
+      staticGroup.scale.set(scaleFactor, scaleFactor, scaleFactor);
+
+      // Optional: center the model by computing bounding box and shifting the group
+      // We'll just keep it as-is, assuming the original was centered.
+
+      console.log('✅ Static Brian model built successfully!');
+      return staticGroup;
     } catch (err) {
       console.error('❌ Brian failed to load:', err);
-      console.error('Make sure brian.glb is in the same folder as index.html');
+      // Return null – we'll fallback to just red spheres
       return null;
     }
   }
 
   const brianModel = await loadBrianModel();
-  const actorMeshes = new Map();
+  const actorMeshes = new Map();   // stores the cloned static models for each actor
   const propMeshes = new Map();
   window.__scene = scene;
   window.__meshes = actorMeshes;
@@ -221,7 +172,7 @@ async function init3D() {
   function syncItems() {
     const liveIds = new Set(state.items.map(i => i.id));
     
-    // Clean up removed items (including debug spheres)
+    // Cleanup
     actorMeshes.forEach((mesh, id) => {
       if (!liveIds.has(id) && !id.toString().endsWith('_debug')) {
         scene.remove(mesh);
@@ -240,38 +191,47 @@ async function init3D() {
         let g = actorMeshes.get(it.id);
         if (!g) {
           if (brianModel) {
-            // Clone the flattened model
             g = brianModel.clone(true);
             g.userData = { isBrian: true, actorId: it.id };
             scene.add(g);
             actorMeshes.set(it.id, g);
-            console.log(`✅ Flattened Brian clone created for actor ${it.id}`);
+            console.log(`✅ Brian static clone created for actor ${it.id}`);
           } else {
-            console.warn(`⚠️ No Brian model – actor ${it.id} not rendered`);
-            return;
+            // No Brian model – we'll just render a colored box as fallback
+            console.warn(`⚠️ No Brian model – using fallback box for actor ${it.id}`);
+            const geo = new THREE.BoxGeometry(0.6, 1.8, 0.4);
+            const mat = new THREE.MeshStandardMaterial({ color: 0x8888ff });
+            g = new THREE.Mesh(geo, mat);
+            g.castShadow = true;
+            g.receiveShadow = true;
+            g.userData = { isBrian: false, actorId: it.id };
+            scene.add(g);
+            actorMeshes.set(it.id, g);
           }
         }
 
-        // --- Now move the root to the actor's world position ---
+        // --- Position the root ---
         const pos = worldToThree(it.x, it.y, 0);
         g.position.copy(pos);
 
-        // --- Apply rotation (facing) to root ---
+        // --- Rotation (facing) ---
         const facingRad = it.facing * state.D2R;
         g.rotation.y = -facingRad + Math.PI / 2;
 
-        // --- Scale: make lead actor bigger and spinning ---
-        if (it.id === 1) {
+        // --- Scale test for lead actor ---
+        if (it.id === 1 && brianModel) {
           g.scale.set(0.017 * 3, 0.017 * 3, 0.017 * 3);
           g.rotation.y += 0.05; // spin
-        } else {
+        } else if (brianModel) {
           g.scale.set(0.017, 0.017, 0.017);
+        } else {
+          // fallback box – keep normal scale
+          g.scale.set(1, 1, 1);
         }
 
-        // --- Force matrix update ---
         g.updateMatrixWorld(true);
 
-        // --- DEBUG: Red sphere at actor position (already confirmed working) ---
+        // --- DEBUG red sphere (always present) ---
         let debugSphere = actorMeshes.get(it.id + '_debug');
         if (!debugSphere) {
           const sphereGeo = new THREE.SphereGeometry(0.3, 8, 8);
@@ -288,9 +248,8 @@ async function init3D() {
         debugSphere.position.copy(pos);
 
         console.log(`[sync] Actor ${it.id} at (${it.x.toFixed(2)}, ${it.y.toFixed(2)}) → root pos (${g.position.x.toFixed(2)}, ${g.position.y.toFixed(2)}, ${g.position.z.toFixed(2)})`);
-        
       } else {
-        // Props (already working)
+        // Props (unchanged)
         let m = propMeshes.get(it.id);
         if (!m) {
           const geo = new THREE.BoxGeometry(it.w, it.h, it.w * 0.7);
@@ -304,8 +263,6 @@ async function init3D() {
         m.position.copy(worldToThree(it.x, it.y, it.h / 2));
       }
     });
-    
-    console.log(`📊 Scene has ${scene.children.length} children (${actorMeshes.size} actor meshes, ${propMeshes.size} prop meshes)`);
   }
 
   function resize() {
@@ -318,34 +275,29 @@ async function init3D() {
   }
   window.addEventListener('resize', resize);
 
+  // Main render function – with error safety
   window.Previz3DRender = function () {
-    resize();
-    const cam = state.CAMS[state.active];
-    const angles = state.fov(cam.lens);
-    camera.fov = angles.v * 180 / Math.PI;
-    camera.updateProjectionMatrix();
-    camera.position.copy(worldToThree(cam.x, cam.y, cam.z));
-    camera.lookAt(worldToThree(cam.aimX, cam.aimY, cam.aimZ));
-    syncItems();
-    
-    const ctxLost = renderer.getContext().isContextLost();
-    if (ctxLost) {
-      console.warn('⚠️ WebGL context is lost!');
-      toggle.checked = false;
-      if (toggle.onchange) toggle.onchange();
-      toggle.disabled = true;
-      window.Previz3DRender = null;
-      return;
-    }
-    
     try {
+      resize();
+      const cam = state.CAMS[state.active];
+      const angles = state.fov(cam.lens);
+      camera.fov = angles.v * 180 / Math.PI;
+      camera.updateProjectionMatrix();
+      camera.position.copy(worldToThree(cam.x, cam.y, cam.z));
+      camera.lookAt(worldToThree(cam.aimX, cam.aimY, cam.aimZ));
+      syncItems();
+      
+      const ctxLost = renderer.getContext().isContextLost();
+      if (ctxLost) {
+        console.warn('⚠️ WebGL context lost!');
+        // Don't disable, just skip render
+        return;
+      }
+      
       renderer.render(scene, camera);
     } catch (err) {
-      console.warn('3D render failed at runtime — switching back to 2D.', err);
-      toggle.checked = false;
-      if (toggle.onchange) toggle.onchange();
-      toggle.disabled = true;
-      window.Previz3DRender = null;
+      console.error('❌ Render error:', err);
+      // Don't disable; just log and continue
     }
   };
 
@@ -361,8 +313,8 @@ async function init3D() {
     use3dActive = toggle.checked;
     canvas2d.style.display = use3dActive ? 'none' : 'block';
     canvas3d.style.display = use3dActive ? 'block' : 'none';
-    if (use3dActive) {
-      if (window.Previz3DRender) window.Previz3DRender();
+    if (use3dActive && window.Previz3DRender) {
+      window.Previz3DRender();
     }
   };
 
@@ -375,11 +327,11 @@ async function init3D() {
   // Initial sync
   syncItems();
   
-  // Start the render loop
+  // Start loop
   requestAnimationFrame(frameLoop);
 }
 
-// Wait for the main app to signal it's ready
+// Wait for main app
 if (window.PrevizState) {
   init3D();
 } else {
