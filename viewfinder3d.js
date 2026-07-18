@@ -97,12 +97,50 @@ async function init3D() {
       });
       console.log('✅ GLTF loaded successfully!');
       const model = gltf.scene;
+      
+      // --- CRITICAL: Disable all animations ---
+      if (gltf.animations && gltf.animations.length > 0) {
+        console.log(`🎬 Found ${gltf.animations.length} animations - disabling them`);
+        gltf.animations = []; // Remove all animations
+      }
+      
+      // Stop any existing animation mixer (if any)
+      if (window._mixer) {
+        window._mixer.stopAllAction();
+        window._mixer = null;
+      }
+
+      // --- CRITICAL: Reset all bone transforms to identity ---
+      model.traverse((child) => {
+        if (child.isBone) {
+          child.position.set(0, 0, 0);
+          child.rotation.set(0, 0, 0);
+          child.scale.set(1, 1, 1);
+          child.updateMatrixWorld(true);
+        }
+        if (child.isSkinnedMesh) {
+          // Reset bind matrix
+          child.bindMatrix.identity();
+          child.bindMatrixInverse.identity();
+          if (child.skeleton) {
+            child.skeleton.bones.forEach(bone => {
+              bone.position.set(0, 0, 0);
+              bone.rotation.set(0, 0, 0);
+              bone.scale.set(1, 1, 1);
+            });
+          }
+        }
+      });
+
+      // Apply base scale and centering
       const scaleFactor = 0.017;
       model.scale.set(scaleFactor, scaleFactor, scaleFactor);
       const box = new THREE.Box3().setFromObject(model);
       const center = box.getCenter(new THREE.Vector3());
       const size = box.getSize(new THREE.Vector3());
       model.position.y = -center.y + (size.y / 2);
+      
+      // Apply alabaster material
       const alabasterMat = new THREE.MeshStandardMaterial({
         color: 0xf5f0eb,
         roughness: 0.4,
@@ -110,14 +148,20 @@ async function init3D() {
         emissive: new THREE.Color(0x222222),
         emissiveIntensity: 0.05,
       });
+      
       model.traverse((child) => {
         if (child.isMesh) {
           child.material = alabasterMat.clone();
           child.castShadow = true;
           child.receiveShadow = true;
+          // Remove morph targets that might affect position
+          if (child.morphTargetInfluences) {
+            child.morphTargetInfluences = [];
+          }
         }
       });
-      console.log('✅ Brian is ready!');
+      
+      console.log('✅ Brian is ready with all animations/transforms disabled!');
       return model;
     } catch (err) {
       console.error('❌ Brian failed to load:', err);
@@ -154,24 +198,47 @@ async function init3D() {
         let g = actorMeshes.get(it.id);
         if (!g) {
           if (brianModel) {
-            g = brianModel.clone();
-            // Reset any baked transforms from the GLTF
-            g.matrix.identity();
-            g.matrixAutoUpdate = true;
+            // --- Deep clone to get a fresh copy ---
+            g = brianModel.clone(true);
+            
+            // --- Strip any leftover animation state ---
+            g.userData = { isBrian: true, actorId: it.id };
+            
+            // --- Reset every node's local transform to identity ---
+            g.traverse((child) => {
+              child.position.set(0, 0, 0);
+              child.rotation.set(0, 0, 0);
+              child.scale.set(1, 1, 1);
+              if (child.isSkinnedMesh) {
+                child.bindMatrix.identity();
+                child.bindMatrixInverse.identity();
+                if (child.skeleton) {
+                  child.skeleton.bones.forEach(bone => {
+                    bone.position.set(0, 0, 0);
+                    bone.rotation.set(0, 0, 0);
+                    bone.scale.set(1, 1, 1);
+                  });
+                }
+              }
+              child.updateMatrixWorld(true);
+            });
+            
+            // Reset root
             g.position.set(0, 0, 0);
             g.rotation.set(0, 0, 0);
             g.scale.set(1, 1, 1);
-            g.userData.isBrian = true;
-            g.userData.actorId = it.id;
+            g.matrix.identity();
+            g.matrixAutoUpdate = true;
+            
             scene.add(g);
             actorMeshes.set(it.id, g);
-            console.log(`✅ Brian clone created for actor ${it.id}`);
+            console.log(`✅ Brian clone created for actor ${it.id} with animations/transforms cleared`);
             
-            // Log the model structure to inspect hierarchy
+            // Log hierarchy to debug
             console.log(`🔍 Model structure for actor ${it.id}:`);
             g.traverse((child) => {
-              if (child.isMesh) {
-                console.log(`  - Mesh: ${child.name || 'unnamed'}`, child.position);
+              if (child.isMesh || child.isSkinnedMesh) {
+                console.log(`  - ${child.type}: ${child.name || 'unnamed'}`, child.position);
               }
             });
           } else {
@@ -180,21 +247,37 @@ async function init3D() {
           }
         }
 
-        // Apply position
+        // --- Now apply the actor's world position to the root ---
         const pos = worldToThree(it.x, it.y, 0);
         g.position.copy(pos);
 
-        // Apply rotation (facing)
-        // Note: Three.js uses Y-up, our world is Z-up, so we need to map facing correctly
-        // The model's forward axis might be +Z or -Z depending on export
-        const facingRad = it.facing * state.D2R;
-        // Try rotating around Y (up in Three.js) which maps to our Z-up world
-        g.rotation.y = -facingRad + Math.PI / 2; // Adjust offset as needed
+        // --- Force all child meshes to local (0,0,0) so they follow root exactly ---
+        g.traverse((child) => {
+          if (child.isMesh || child.isSkinnedMesh) {
+            child.position.set(0, 0, 0);
+            child.rotation.set(0, 0, 0);
+            child.scale.set(1, 1, 1);
+            child.updateMatrixWorld(true);
+          }
+        });
 
-        // Force matrix update
+        // --- Apply rotation (facing) to root ---
+        const facingRad = it.facing * state.D2R;
+        g.rotation.y = -facingRad + Math.PI / 2; // Adjust offset if needed
+
+        // --- Scale: make lead actor bigger and spinning for easy visual confirmation ---
+        if (it.id === 1) {
+          g.scale.set(0.017 * 3, 0.017 * 3, 0.017 * 3);
+          // Spin continuously
+          g.rotation.y += 0.05;
+        } else {
+          g.scale.set(0.017, 0.017, 0.017);
+        }
+
+        // --- Force matrix update on entire hierarchy ---
         g.updateMatrixWorld(true);
 
-        // --- DEBUG: Red sphere at actor position ---
+        // --- DEBUG: Red sphere at actor position (already confirmed working) ---
         let debugSphere = actorMeshes.get(it.id + '_debug');
         if (!debugSphere) {
           const sphereGeo = new THREE.SphereGeometry(0.3, 8, 8);
@@ -210,28 +293,10 @@ async function init3D() {
         }
         debugSphere.position.copy(pos);
 
-        // --- TEST: Make lead actor (id 1) obviously different ---
-        if (it.id === 1) {
-          g.scale.set(0.017 * 3, 0.017 * 3, 0.017 * 3); // 3x size
-          g.rotation.y += 0.05; // Continuous spin (will accumulate each frame!)
-        } else {
-          g.scale.set(0.017, 0.017, 0.017); // Normal size
-        }
-
-        console.log(`[sync] Actor ${it.id} at (${it.x.toFixed(2)}, ${it.y.toFixed(2)}) → mesh pos (${g.position.x.toFixed(2)}, ${g.position.y.toFixed(2)}, ${g.position.z.toFixed(2)}) scale ${g.scale.x.toFixed(3)}`);
-        
-        // Verify the mesh is actually in the scene
-        let foundInScene = false;
-        scene.children.forEach(child => {
-          if (child === g) foundInScene = true;
-        });
-        if (!foundInScene) {
-          console.error(`⚠️ Actor ${it.id} mesh is NOT in the scene! Re-adding...`);
-          scene.add(g);
-        }
+        console.log(`[sync] Actor ${it.id} at (${it.x.toFixed(2)}, ${it.y.toFixed(2)}) → root pos (${g.position.x.toFixed(2)}, ${g.position.y.toFixed(2)}, ${g.position.z.toFixed(2)}) scale ${g.scale.x.toFixed(3)}`);
         
       } else {
-        // Props
+        // Props (already working)
         let m = propMeshes.get(it.id);
         if (!m) {
           const geo = new THREE.BoxGeometry(it.w, it.h, it.w * 0.7);
@@ -246,7 +311,6 @@ async function init3D() {
       }
     });
     
-    // Log total scene children count for debugging
     console.log(`📊 Scene has ${scene.children.length} children (${actorMeshes.size} actor meshes, ${propMeshes.size} prop meshes)`);
   }
 
@@ -270,7 +334,6 @@ async function init3D() {
     camera.lookAt(worldToThree(cam.aimX, cam.aimY, cam.aimZ));
     syncItems();
     
-    // Check context status
     const ctxLost = renderer.getContext().isContextLost();
     if (ctxLost) {
       console.warn('⚠️ WebGL context is lost!');
@@ -305,7 +368,6 @@ async function init3D() {
     canvas2d.style.display = use3dActive ? 'none' : 'block';
     canvas3d.style.display = use3dActive ? 'block' : 'none';
     if (use3dActive) {
-      // Force a render when switching back to 3D
       if (window.Previz3DRender) window.Previz3DRender();
     }
   };
@@ -321,12 +383,6 @@ async function init3D() {
   
   // Start the render loop
   requestAnimationFrame(frameLoop);
-  
-  // Also trigger render on any state change from the main app
-  const origRender = window.Previz3DRender;
-  window.Previz3DRender = function() {
-    if (origRender) origRender();
-  };
 }
 
 // Wait for the main app to signal it's ready
