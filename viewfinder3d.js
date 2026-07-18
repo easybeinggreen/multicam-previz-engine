@@ -26,6 +26,15 @@ async function init3D() {
     return;
   }
 
+  // NEW: catch silent context loss, which freezes the canvas with zero JS error
+  canvas3d.addEventListener('webglcontextlost', (e) => {
+    e.preventDefault();
+    console.error('❌ WebGL context was lost — this is why the screen froze.');
+  });
+  canvas3d.addEventListener('webglcontextrestored', () => {
+    console.warn('✅ WebGL context restored, resuming render.');
+  });
+
   const state = window.PrevizState;
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0xf5f0eb);
@@ -140,8 +149,11 @@ async function init3D() {
   const actorMeshes = new Map();
   const propMeshes = new Map();
 
+  // TEMP DEBUG — remove once movement is confirmed fixed
+  window.__scene = scene;
+  window.__meshes = actorMeshes;
+
   function syncItems() {
-    window.__scene = scene; window.__meshes = actorMeshes;
     const liveIds = new Set(state.items.map(i => i.id));
     
     actorMeshes.forEach((mesh, id) => { 
@@ -179,8 +191,8 @@ async function init3D() {
         if (g) {
           const pos = worldToThree(it.x, it.y, 0);
           g.position.copy(pos);
-          g.scale.setScalar(0.017 * (1 + 0.3 * Math.sin(Date.now() / 200)));
           console.log('[sync]', it.id, 'data:', it.x.toFixed(2), it.y.toFixed(2), '→ mesh:', g.position.x.toFixed(2), g.position.y.toFixed(2), g.position.z.toFixed(2));
+          
           const facingRad = it.facing * state.D2R;
           const lookTarget = worldToThree(it.x + Math.cos(facingRad), it.y + Math.sin(facingRad), 0);
           g.lookAt(lookTarget.x, g.position.y, lookTarget.z);
@@ -229,13 +241,17 @@ async function init3D() {
     }
   };
 
+  // CHANGED: continuous render loop instead of only rendering on triggered events
+  let use3dActive = true;
+  function frameLoop() {
+    if (use3dActive && window.Previz3DRender) window.Previz3DRender();
+    requestAnimationFrame(frameLoop);
+  }
+
   const toggleChangeHandler = () => {
-    const use3d = toggle.checked;
-    canvas2d.style.display = use3d ? 'none' : 'block';
-    canvas3d.style.display = use3d ? 'block' : 'none';
-    if (use3d && window.Previz3DRender) {
-      window.Previz3DRender();
-    }
+    use3dActive = toggle.checked;
+    canvas2d.style.display = use3dActive ? 'none' : 'block';
+    canvas3d.style.display = use3dActive ? 'block' : 'none';
   };
 
   toggle.onchange = toggleChangeHandler;
@@ -244,10 +260,8 @@ async function init3D() {
   
   canvas2d.style.display = 'none';
   canvas3d.style.display = 'block';
-  
-  setTimeout(() => {
-    window.Previz3DRender();
-  }, 100);
+
+  requestAnimationFrame(frameLoop);
 }
 
 init3D();
