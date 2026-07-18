@@ -40,7 +40,7 @@ async function init3D() {
   
   const camera = new THREE.PerspectiveCamera(50, 16 / 9, 0.1, 200);
 
-  // Lights (unchanged)
+  // Lighting
   const ambient = new THREE.AmbientLight(0xffffff, 0.5);
   scene.add(ambient);
   
@@ -70,7 +70,7 @@ async function init3D() {
   ground.receiveShadow = true;
   scene.add(ground);
 
-  // Vignettes (unchanged)
+  // Vignette panels
   Object.entries(state.V).forEach(([name, ang]) => {
     const rad = ang * state.D2R;
     const center = state.pt(ang, state.R_VIGNETTE);
@@ -89,28 +89,18 @@ async function init3D() {
     scene.add(mesh);
   });
 
-  // --- SAFE Brian loader: extract geometries and strip skinning ---
+  // --- Build static Brian model (skinning stripped) ---
   async function loadBrianModel() {
     const loader = new GLTFLoader();
     const url = './brian.glb';
-    console.log('🔄 Attempting to load Brian from:', url);
+    console.log('🔄 Loading Brian from:', url);
     try {
       const gltf = await new Promise((resolve, reject) => {
         loader.load(url, resolve, undefined, reject);
       });
-      console.log('✅ GLTF loaded successfully!');
+      console.log('✅ GLTF loaded');
       const original = gltf.scene;
 
-      // Log hierarchy (for debugging)
-      console.log('🔍 Full hierarchy:');
-      original.traverse((child) => {
-        const type = child.type;
-        const name = child.name || 'unnamed';
-        const pos = child.position.toArray().map(v => v.toFixed(3)).join(',');
-        console.log(`  ${type} "${name}" pos(${pos})`);
-      });
-
-      // --- Build a new static group by extracting geometry and stripping skinning ---
       const staticGroup = new THREE.Group();
       staticGroup.name = 'BrianStatic';
 
@@ -130,25 +120,18 @@ async function init3D() {
         }
       });
 
-      console.log(`📦 Found ${meshes.length} meshes. Creating static copies without skinning...`);
-
       meshes.forEach((srcMesh) => {
-        // Clone the geometry
         const geo = srcMesh.geometry.clone();
-        
-        // --- CRITICAL: Remove skinning attributes to prevent Three.js from treating this as skinned ---
+        // Remove skinning attributes to prevent Three.js from treating as skinned
         if (geo.attributes.skinIndex) geo.deleteAttribute('skinIndex');
         if (geo.attributes.skinWeight) geo.deleteAttribute('skinWeight');
-        // Also remove any morph attributes if present (optional)
         if (geo.morphAttributes) {
           for (const key in geo.morphAttributes) {
             delete geo.morphAttributes[key];
           }
         }
-        // Ensure the geometry is not seen as skinned
         geo.isSkinnedMesh = false;
 
-        // Create a regular Mesh (not SkinnedMesh) with the cleaned geometry
         const mat = alabasterMat.clone();
         const newMesh = new THREE.Mesh(geo, mat);
         newMesh.position.set(0, 0, 0);
@@ -159,21 +142,21 @@ async function init3D() {
         staticGroup.add(newMesh);
       });
 
-      // Apply uniform scale to the entire static group
+      // Scale to achieve ~1.8m height (adjust this factor if needed)
+      // The current factor 0.017 gives a height that looks correct per user feedback.
       const scaleFactor = 0.017;
       staticGroup.scale.set(scaleFactor, scaleFactor, scaleFactor);
 
-      // Optional: center the model (skip for now, assume it's centered)
-      console.log('✅ Static Brian model built successfully (skinning stripped)!');
+      console.log('✅ Static Brian ready (skinning stripped)');
       return staticGroup;
     } catch (err) {
-      console.error('❌ Brian failed to load:', err);
+      console.error('❌ Brian load failed:', err);
       return null;
     }
   }
 
   const brianModel = await loadBrianModel();
-  const actorMeshes = new Map();   // stores the cloned static models for each actor
+  const actorMeshes = new Map();
   const propMeshes = new Map();
   window.__scene = scene;
   window.__meshes = actorMeshes;
@@ -181,9 +164,9 @@ async function init3D() {
   function syncItems() {
     const liveIds = new Set(state.items.map(i => i.id));
     
-    // Cleanup
+    // Cleanup removed actors and props
     actorMeshes.forEach((mesh, id) => {
-      if (!liveIds.has(id) && !id.toString().endsWith('_debug')) {
+      if (!liveIds.has(id)) {
         scene.remove(mesh);
         actorMeshes.delete(id);
       }
@@ -204,10 +187,9 @@ async function init3D() {
             g.userData = { isBrian: true, actorId: it.id };
             scene.add(g);
             actorMeshes.set(it.id, g);
-            console.log(`✅ Brian static clone created for actor ${it.id}`);
           } else {
-            // Fallback: colored box
-            console.warn(`⚠️ No Brian model – using fallback box for actor ${it.id}`);
+            // Fallback: coloured box (should rarely happen)
+            console.warn(`⚠️ No Brian model – fallback box for actor ${it.id}`);
             const geo = new THREE.BoxGeometry(0.6, 1.8, 0.4);
             const mat = new THREE.MeshStandardMaterial({ color: 0x8888ff });
             g = new THREE.Mesh(geo, mat);
@@ -219,45 +201,24 @@ async function init3D() {
           }
         }
 
-        // --- Position the root ---
+        // Apply world position
         const pos = worldToThree(it.x, it.y, 0);
         g.position.copy(pos);
 
-        // --- Rotation (facing) ---
+        // Apply facing rotation
         const facingRad = it.facing * state.D2R;
         g.rotation.y = -facingRad + Math.PI / 2;
 
-        // --- Scale test for lead actor ---
-        if (it.id === 1 && brianModel) {
-          g.scale.set(0.017 * 3, 0.017 * 3, 0.017 * 3);
-          g.rotation.y += 0.05; // spin
-        } else if (brianModel) {
+        // Uniform scale (all actors same size)
+        if (brianModel) {
           g.scale.set(0.017, 0.017, 0.017);
         } else {
           g.scale.set(1, 1, 1);
         }
 
         g.updateMatrixWorld(true);
-
-        // --- DEBUG red sphere (always present) ---
-        let debugSphere = actorMeshes.get(it.id + '_debug');
-        if (!debugSphere) {
-          const sphereGeo = new THREE.SphereGeometry(0.3, 8, 8);
-          const sphereMat = new THREE.MeshStandardMaterial({ 
-            color: 0xff0000,
-            emissive: 0xff0000,
-            emissiveIntensity: 0.3
-          });
-          debugSphere = new THREE.Mesh(sphereGeo, sphereMat);
-          debugSphere.castShadow = true;
-          scene.add(debugSphere);
-          actorMeshes.set(it.id + '_debug', debugSphere);
-        }
-        debugSphere.position.copy(pos);
-
-        console.log(`[sync] Actor ${it.id} at (${it.x.toFixed(2)}, ${it.y.toFixed(2)}) → root pos (${g.position.x.toFixed(2)}, ${g.position.y.toFixed(2)}, ${g.position.z.toFixed(2)})`);
       } else {
-        // Props (unchanged)
+        // Props (unchanged, already working)
         let m = propMeshes.get(it.id);
         if (!m) {
           const geo = new THREE.BoxGeometry(it.w, it.h, it.w * 0.7);
@@ -283,7 +244,7 @@ async function init3D() {
   }
   window.addEventListener('resize', resize);
 
-  // Main render function – with error safety
+  // Main render loop with error safety
   window.Previz3DRender = function () {
     try {
       resize();
@@ -295,16 +256,13 @@ async function init3D() {
       camera.lookAt(worldToThree(cam.aimX, cam.aimY, cam.aimZ));
       syncItems();
       
-      const ctxLost = renderer.getContext().isContextLost();
-      if (ctxLost) {
-        console.warn('⚠️ WebGL context lost!');
+      if (renderer.getContext().isContextLost()) {
+        console.warn('WebGL context lost, skipping render');
         return;
       }
-      
       renderer.render(scene, camera);
     } catch (err) {
-      console.error('❌ Render error:', err);
-      // Do NOT disable 3D – just log and continue
+      console.error('Render error:', err);
     }
   };
 
@@ -333,8 +291,6 @@ async function init3D() {
 
   // Initial sync
   syncItems();
-  
-  // Start loop
   requestAnimationFrame(frameLoop);
 }
 
