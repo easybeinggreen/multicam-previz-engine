@@ -141,6 +141,7 @@ async function init3D() {
   const propMeshes = new Map();
 
   function syncItems() {
+    window.__scene = scene; window.__meshes = actorMeshes;
     const liveIds = new Set(state.items.map(i => i.id));
     
     actorMeshes.forEach((mesh, id) => { 
