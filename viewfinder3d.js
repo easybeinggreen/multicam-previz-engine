@@ -26,7 +26,6 @@ async function init3D() {
     return;
   }
 
-  // NEW: catch silent context loss, which freezes the canvas with zero JS error
   canvas3d.addEventListener('webglcontextlost', (e) => {
     e.preventDefault();
     console.error('❌ WebGL context was lost — this is why the screen froze.');
@@ -41,7 +40,6 @@ async function init3D() {
   
   const camera = new THREE.PerspectiveCamera(50, 16 / 9, 0.1, 200);
 
-  // Lighting
   const ambient = new THREE.AmbientLight(0xffffff, 0.5);
   scene.add(ambient);
   
@@ -63,7 +61,6 @@ async function init3D() {
   rimLight.position.set(0, 10, -20);
   scene.add(rimLight);
 
-  // Ground
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(80, 80),
     new THREE.MeshStandardMaterial({ color: 0xe8e4df, roughness: 0.8 })
@@ -72,7 +69,6 @@ async function init3D() {
   ground.receiveShadow = true;
   scene.add(ground);
 
-  // Vignette walls
   Object.entries(state.V).forEach(([name, ang]) => {
     const rad = ang * state.D2R;
     const center = state.pt(ang, state.R_VIGNETTE);
@@ -91,33 +87,22 @@ async function init3D() {
     scene.add(mesh);
   });
 
-  // --- Load Brian model ---
   async function loadBrianModel() {
     const loader = new GLTFLoader();
-    // IMPORTANT: Make sure this path is correct
     const url = './brian.glb';
-    
     console.log('🔄 Attempting to load Brian from:', url);
-    
     try {
       const gltf = await new Promise((resolve, reject) => {
         loader.load(url, resolve, undefined, reject);
       });
-      
       console.log('✅ GLTF loaded successfully!');
       const model = gltf.scene;
-      
-      // Scale Brian
       const scaleFactor = 0.017;
       model.scale.set(scaleFactor, scaleFactor, scaleFactor);
-      
-      // Position feet on ground
       const box = new THREE.Box3().setFromObject(model);
       const center = box.getCenter(new THREE.Vector3());
       const size = box.getSize(new THREE.Vector3());
       model.position.y = -center.y + (size.y / 2);
-      
-      // Apply alabaster material
       const alabasterMat = new THREE.MeshStandardMaterial({
         color: 0xf5f0eb,
         roughness: 0.4,
@@ -125,7 +110,6 @@ async function init3D() {
         emissive: new THREE.Color(0x222222),
         emissiveIntensity: 0.05,
       });
-      
       model.traverse((child) => {
         if (child.isMesh) {
           child.material = alabasterMat.clone();
@@ -133,7 +117,6 @@ async function init3D() {
           child.receiveShadow = true;
         }
       });
-      
       console.log('✅ Brian is ready!');
       return model;
     } catch (err) {
@@ -143,57 +126,44 @@ async function init3D() {
     }
   }
 
-  // Try to load Brian
   const brianModel = await loadBrianModel();
-
   const actorMeshes = new Map();
   const propMeshes = new Map();
-
-  // TEMP DEBUG — remove once movement is confirmed fixed
   window.__scene = scene;
   window.__meshes = actorMeshes;
 
   function syncItems() {
     const liveIds = new Set(state.items.map(i => i.id));
-    
-    actorMeshes.forEach((mesh, id) => { 
-      if (!liveIds.has(id)) { 
-        scene.remove(mesh); 
-        actorMeshes.delete(id); 
-      } 
-    });
-    
-    propMeshes.forEach((mesh, id) => { 
-      if (!liveIds.has(id)) { 
-        scene.remove(mesh); 
-        propMeshes.delete(id); 
-      } 
-    });
+    actorMeshes.forEach((mesh, id) => { if (!liveIds.has(id)) { scene.remove(mesh); actorMeshes.delete(id); } });
+    propMeshes.forEach((mesh, id) => { if (!liveIds.has(id)) { scene.remove(mesh); propMeshes.delete(id); } });
 
     state.items.forEach(it => {
       if (it.type === 'actor') {
         let g = actorMeshes.get(it.id);
-        
         if (!g) {
           if (brianModel) {
-            // Use Brian
             g = brianModel.clone();
             console.log('✅ Brian clone created for actor', it.id);
           } else {
-            // NO FALLBACK — just skip this actor
             console.warn('⚠️ No Brian model available — actor', it.id, 'not rendered');
             return;
           }
           scene.add(g);
           actorMeshes.set(it.id, g);
         }
-        
         if (g) {
           const pos = worldToThree(it.x, it.y, 0);
           g.position.copy(pos);
-          g.traverse(c => { if (c.isMesh) c.material.color.set(0xff0000); });
+
+          // TEMP UNMISSABLE TEST — Lead actor (id 1) only: spins continuously and is 3x size.
+          // If this is the Brian you see on screen, you cannot miss this. Remove once confirmed.
+          if (it.id === 1) {
+            g.rotation.y += 0.08;
+            g.scale.setScalar(0.017 * 3);
+          }
+
           console.log('[sync]', it.id, 'data:', it.x.toFixed(2), it.y.toFixed(2), '→ mesh:', g.position.x.toFixed(2), g.position.y.toFixed(2), g.position.z.toFixed(2));
-          
+
           const facingRad = it.facing * state.D2R;
           const lookTarget = worldToThree(it.x + Math.cos(facingRad), it.y + Math.sin(facingRad), 0);
           g.lookAt(lookTarget.x, g.position.y, lookTarget.z);
@@ -242,7 +212,6 @@ async function init3D() {
     }
   };
 
-  // CHANGED: continuous render loop instead of only rendering on triggered events
   let use3dActive = true;
   function frameLoop() {
     if (use3dActive && window.Previz3DRender) window.Previz3DRender();
@@ -258,7 +227,6 @@ async function init3D() {
   toggle.onchange = toggleChangeHandler;
   toggle.disabled = false;
   toggle.checked = true;
-  
   canvas2d.style.display = 'none';
   canvas3d.style.display = 'block';
 
