@@ -202,6 +202,7 @@ async function init3D() {
     camera.lookAt(worldToThree(cam.aimX, cam.aimY, cam.aimZ));
     syncItems();
     try {
+      console.log('ctxLost:', renderer.getContext().isContextLost());
       renderer.render(scene, camera);
     } catch (err) {
       console.warn('3D render failed at runtime — switching back to 2D.', err);
