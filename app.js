@@ -145,4 +145,182 @@ function syncActorFields() {
   document.getElementById('ah').value = a.h; document.getElementById('aw').value = a.w; document.getElementById('ad').value = a.d;
   standSel.value = a.standAt || "V3";
 }
-document.getElementById('faces').oninput
+
+// ---------- MISSING CONTINUATION (reconstructed) ----------
+document.getElementById('faces').oninput = e => {
+  const a = curActor(); if (!a) return;
+  a.facing = +e.target.value;
+  document.getElementById('facev').innerText = a.facing + "°";
+  render();
+};
+
+document.getElementById('ah').oninput = e => { const a = curActor(); if (a) { a.h = +e.target.value; render(); } };
+document.getElementById('aw').oninput = e => { const a = curActor(); if (a) { a.w = +e.target.value; render(); } };
+document.getElementById('ad').oninput = e => { const a = curActor(); if (a) { a.d = +e.target.value; render(); } };
+
+function syncControls() {
+  const c = CAMS[active];
+  document.getElementById('fs').value = c.lens;
+  document.getElementById('fv').innerText = c.lens + "mm";
+  document.getElementById('azs').value = c.aimZ;
+  document.getElementById('az').innerText = c.aimZ.toFixed(1) + "m";
+  document.getElementById('chzs').value = c.z;
+  document.getElementById('chz').innerText = c.z.toFixed(1) + "m";
+  
+  if (c.type === "track") {
+    document.getElementById('tps').disabled = false;
+    document.getElementById('tps').value = c.trackPos;
+    document.getElementById('tpv').innerText = Math.round(c.trackPos * 100) + "%";
+  } else {
+    document.getElementById('tps').disabled = true;
+    document.getElementById('tpv').innerText = "N/A";
+  }
+  
+  const aimMatch = Object.keys(TARGETS).find(k => {
+    const t = TARGETS[k]();
+    return Math.abs(t.x - c.aimX) < 0.01 && Math.abs(t.y - c.aimY) < 0.01;
+  });
+  document.getElementById('aimpreset').value = aimMatch || "Custom";
+}
+
+function renderShots() {
+  const list = document.getElementById('shotlist');
+  list.innerHTML = '';
+  shots.forEach((s, i) => {
+    const li = document.createElement('li');
+    li.innerText = `${i + 1}. ${s}`;
+    list.appendChild(li);
+  });
+}
+
+// ---------- Canvas rendering ----------
+const canvas = document.getElementById('stage');
+const ctx = canvas.getContext('2d');
+
+function worldToScreen(wx, wy) {
+  const scale = 18 * viewZoom; // pixels per meter
+  return {
+    x: canvas.width / 2 + (wx + viewPanX) * scale,
+    y: canvas.height / 2 - (wy + viewPanY) * scale
+  };
+}
+
+function screenToWorld(sx, sy) {
+  const scale = 18 * viewZoom;
+  return {
+    x: (sx - canvas.width / 2) / scale - viewPanX,
+    y: -(sy - canvas.height / 2) / scale - viewPanY
+  };
+}
+
+function drawPolygon(ctx, pts, color, stroke) {
+  ctx.beginPath();
+  pts.forEach((p, i) => {
+    const s = worldToScreen(p.x, p.y);
+    if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y);
+  });
+  ctx.closePath();
+  if (color) { ctx.fillStyle = color; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1; ctx.stroke(); }
+}
+
+function drawCircle(ctx, wx, wy, rM, color, stroke) {
+  const s = worldToScreen(wx, wy);
+  const scale = 18 * viewZoom;
+  ctx.beginPath();
+  ctx.arc(s.x, s.y, rM * scale, 0, Math.PI * 2);
+  if (color) { ctx.fillStyle = color; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1; ctx.stroke(); }
+}
+
+function drawLine(ctx, w1, w2, color, width) {
+  const s1 = worldToScreen(w1.x, w1.y);
+  const s2 = worldToScreen(w2.x, w2.y);
+  ctx.beginPath();
+  ctx.moveTo(s1.x, s1.y);
+  ctx.lineTo(s2.x, s2.y);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width || 1;
+  ctx.stroke();
+}
+
+function drawText(ctx, text, wx, wy, color, align) {
+  const s = worldToScreen(wx, wy);
+  ctx.fillStyle = color || "#fff";
+  ctx.font = "11px sans-serif";
+  ctx.textAlign = align || "center";
+  ctx.fillText(text, s.x, s.y);
+}
+
+function render() {
+  // Resize canvas
+  const rect = canvas.parentElement.getBoundingClientRect();
+  canvas.width = rect.width;
+  canvas.height = rect.height;
+  
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  
+  // Background
+  ctx.fillStyle = "#1a1a2e";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  
+  // Grid
+  const scale = 18 * viewZoom;
+  ctx.strokeStyle = "#333";
+  ctx.lineWidth = 0.5;
+  for (let x = -20; x <= 20; x += 2) {
+    const s1 = worldToScreen(x, -20);
+    const s2 = worldToScreen(x, 20);
+    ctx.beginPath(); ctx.moveTo(s1.x, s1.y); ctx.lineTo(s2.x, s2.y); ctx.stroke();
+  }
+  for (let y = -20; y <= 20; y += 2) {
+    const s1 = worldToScreen(-20, y);
+    const s2 = worldToScreen(20, y);
+    ctx.beginPath(); ctx.moveTo(s1.x, s1.y); ctx.lineTo(s2.x, s2.y); ctx.stroke();
+  }
+  
+  // Stage floor
+  drawPolygon(ctx, [
+    { x: -SW / 2, y: 0 },
+    { x: SW / 2, y: 0 },
+    { x: SW / 2, y: SH },
+    { x: -SW / 2, y: SH }
+  ], "#16213e", "#0f3460");
+  
+  // Vignette arc
+  const vignettePts = [];
+  for (let a = V.V5 - 5; a <= V.V1 + 5; a += 2) {
+    vignettePts.push(pt(a, R_VIGNETTE));
+  }
+  drawPolygon(ctx, vignettePts, "#0f3460", "#e94560");
+  
+  // Vignette labels
+  Object.keys(V).forEach(k => {
+    const p = pt(V[k], R_VIGNETTE + 0.5);
+    drawText(ctx, k, p.x, p.y, "#e94560");
+  });
+  
+  // Stage marks
+  Object.keys(STAGE_MARKS).forEach(k => {
+    const m = STAGE_MARKS[k];
+    drawCircle(ctx, m.x, m.y, 0.15, "#e94560", "#fff");
+    drawText(ctx, k, m.x, m.y - 0.4, "#fff");
+  });
+  
+  // Audience seats
+  for (let row = 0; row < SEAT_ROWS; row++) {
+    const t = row / (SEAT_ROWS - 1);
+    const y = SEAT_Y_FRONT + t * (SEAT_Y_BACK - SEAT_Y_FRONT);
+    SEAT_BLOCKS.forEach(block => {
+      for (let s = 0; s < block.seatsPerRow; s++) {
+        const st = s / (block.seatsPerRow - 1);
+        const x = block.xFrom + st * (block.xTo - block.xFrom);
+        drawCircle(ctx, x, y - R_VIGNETTE, 0.12, "#2a2a4a", "#444");
+      }
+    });
+  }
+  
+  // Items (actors & props)
+  items.forEach(item => {
+    const s = worldToScreen(item.x, item.y);
+    const w = item.w
