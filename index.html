@@ -13,109 +13,110 @@
     <p class="subtitle">Plan camera lenses against a real venue floor plan before you order glass</p>
   </header>
 
-  <div class="layout">
-    <aside class="sidebar">
-      <section class="panel">
-        <label class="field-label" for="cs">Active camera</label>
-        <select id="cs"></select>
-        <div id="camtype" class="hint"></div>
-      </section>
-
-      <section class="panel">
-        <div class="row-label">
-          <label class="field-label" for="chzs">Camera height (default — edit if known)</label>
-          <span id="chz" class="value-badge">1.2m</span>
+  <div class="controls-bar">
+    <section class="control-section cameras-section">
+      <h3 class="section-title">Cameras</h3>
+      <div class="controls-grid">
+        <div class="control-group">
+          <label class="field-label" for="cs">Active camera</label>
+          <select id="cs"></select>
+          <div id="camtype" class="hint"></div>
         </div>
-        <input type="range" id="chzs" min="0.3" max="6" step="0.1">
-      </section>
-
-      <section class="panel" id="trackrow" style="display:none">
-        <div class="row-label">
-          <label class="field-label" for="tps">Position along track</label>
-          <span id="tpv" class="value-badge">0%</span>
+        <div class="control-group">
+          <label class="field-label" for="aimpreset">Aim preset</label>
+          <select id="aimpreset"></select>
         </div>
-        <input type="range" id="tps" min="0" max="1" step="0.01">
-      </section>
-
-      <section class="panel">
-        <label class="field-label" for="aimpreset">Aim preset</label>
-        <select id="aimpreset"></select>
-        <div class="hint">or drag the green cross on the plan</div>
-      </section>
-
-      <section class="panel">
-        <div class="row-label">
-          <label class="field-label" for="azs">Focal point height</label>
-          <span id="az" class="value-badge">1.6m</span>
+        <div class="control-group">
+          <div class="row-label">
+            <label class="field-label" for="chzs">Camera height</label>
+            <span id="chz" class="value-badge">1.2m</span>
+          </div>
+          <input type="range" id="chzs" min="0.3" max="6" step="0.1">
         </div>
-        <input type="range" id="azs" min="0" max="4" step="0.1">
-      </section>
-
-      <section class="panel">
-        <div class="row-label">
-          <label class="field-label" for="fs">Focal length (zoom to find your lens)</label>
-          <span id="fv" class="value-badge">50mm</span>
+        <div class="control-group" id="trackrow" style="display:none">
+          <div class="row-label">
+            <label class="field-label" for="tps">Position on track</label>
+            <span id="tpv" class="value-badge">0%</span>
+          </div>
+          <input type="range" id="tps" min="0" max="1" step="0.01">
         </div>
-        <input type="range" id="fs" min="14" max="1000" value="50">
-      </section>
-
-      <section class="panel">
-        <label class="field-label" for="actorsel">Actor</label>
-        <select id="actorsel"></select>
-        <div class="row-label" style="margin-top:8px">
-          <label class="field-label" for="standat">Stand at</label>
+        <div class="control-group">
+          <div class="row-label">
+            <label class="field-label" for="azs">Focal point height</label>
+            <span id="az" class="value-badge">1.6m</span>
+          </div>
+          <input type="range" id="azs" min="0" max="4" step="0.1">
         </div>
-        <select id="standat"></select>
-        <div class="hint">Sets a starting mark — still freely draggable after</div>
-        <div class="row-label" style="margin-top:8px">
-          <label class="field-label" for="faces">Facing</label>
-          <span id="facev" class="value-badge">100°</span>
+        <div class="control-group">
+          <div class="row-label">
+            <label class="field-label" for="fs">Focal length</label>
+            <span id="fv" class="value-badge">50mm</span>
+          </div>
+          <input type="range" id="fs" min="14" max="1000" value="50">
         </div>
-        <input type="range" id="faces" min="0" max="360" step="5">
-        <div class="dim-row">
-          <div><label class="dim-label">H(m)</label><input id="ah" type="number" step="0.05"></div>
-          <div><label class="dim-label">W(m)</label><input id="aw" type="number" step="0.05"></div>
-          <div><label class="dim-label">D(m)</label><input id="ad" type="number" step="0.05"></div>
-        </div>
-      </section>
-
-      <section class="panel button-row">
-        <button id="ba">Add actor</button>
-        <button id="bt">Add table</button>
-        <button id="resetview">Reset floor plan view</button>
-      </section>
-
-      <section class="panel">
-        <label class="field-label" for="note">Shot note</label>
-        <input id="note" placeholder="e.g. CAM5 head-to-toe">
-        <button id="logbtn">Log shot</button>
-        <div id="shotlist" class="shot-list"></div>
-      </section>
-    </aside>
-
-    <main class="stage">
-      <div class="view-block">
-        <div class="view-caption">Floor plan — red marker is origin (0,0,0) at the base of Vignette 3. Scroll to zoom, drag empty space to pan.</div>
-        <canvas id="fp" width="640" height="560"></canvas>
-      </div>
-      <div class="view-block">
-        <div class="view-caption">Director's viewfinder (16:9)</div>
-        <label class="hint use3d-row"><input type="checkbox" id="use3d" disabled> Use 3D viewfinder (enables automatically if your browser supports it)</label>
-        <div class="vf-wrap">
-          <canvas id="vf" width="640" height="360"></canvas>
-          <canvas id="vf3d" width="960" height="540" style="display:none"></canvas>
-          <div class="hud">
-            <div id="hcam" class="hud-cam"></div>
-            <div id="hlens" class="hud-lens"></div>
-            <div id="hscale" class="hud-scale"></div>
+        <div class="control-group distance-group">
+          <div class="distance-readout">
+            <span class="dist-label">Distance to subject:</span>
+            <span id="distval" class="dist-value">—</span>
           </div>
         </div>
       </div>
-    </main>
+    </section>
+
+    <section class="control-section subject-section">
+      <h3 class="section-title">Subject</h3>
+      <div class="controls-grid">
+        <div class="control-group button-group">
+          <button id="ba">Add actor</button>
+          <button id="bt">Add table</button>
+        </div>
+        <div class="control-group">
+          <label class="field-label" for="actorsel">Actor</label>
+          <select id="actorsel"></select>
+        </div>
+        <div class="control-group">
+          <label class="field-label" for="standat">Stand at</label>
+          <select id="standat"></select>
+        </div>
+        <div class="control-group">
+          <div class="row-label">
+            <label class="field-label" for="faces">Facing</label>
+            <span id="facev" class="value-badge">100°</span>
+          </div>
+          <input type="range" id="faces" min="0" max="360" step="5">
+        </div>
+        <div class="control-group">
+          <div class="dim-row">
+            <div><label class="dim-label">H(m)</label><input id="ah" type="number" step="0.05"></div>
+            <div><label class="dim-label">W(m)</label><input id="aw" type="number" step="0.05"></div>
+            <div><label class="dim-label">D(m)</label><input id="ad" type="number" step="0.05"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="viewers-row">
+    <div class="view-block">
+      <div class="view-caption">Floor plan — red marker is origin (0,0,0) at the base of Vignette 3. Scroll to zoom, drag empty space to pan.</div>
+      <canvas id="fp" width="640" height="560"></canvas>
+    </div>
+    <div class="view-block">
+      <div class="view-caption">Director's viewfinder (16:9)</div>
+      <label class="hint use3d-row"><input type="checkbox" id="use3d" disabled> Use 3D viewfinder (enables automatically if your browser supports it)</label>
+      <div class="vf-wrap">
+        <canvas id="vf" width="640" height="360"></canvas>
+        <canvas id="vf3d" width="960" height="540" style="display:none"></canvas>
+        <div class="hud">
+          <div id="hcam" class="hud-cam"></div>
+          <div id="hlens" class="hud-lens"></div>
+          <div id="hscale" class="hud-scale"></div>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
-<!-- Import Map: tells the browser where to find "three" -->
 <script type="importmap">
 {
   "imports": {
