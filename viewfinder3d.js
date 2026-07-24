@@ -92,7 +92,7 @@ async function init3D() {
   // --- Build static Brian model (skinning stripped) ---
   async function loadBrianModel() {
     const loader = new GLTFLoader();
-    const url = './brian.glb';
+    const url = './Brian_A_260724.glb';
     console.log('🔄 Loading Brian from:', url);
     try {
       const gltf = await new Promise((resolve, reject) => {
