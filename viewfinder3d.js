@@ -83,7 +83,7 @@ async function init3D() {
     scene.add(mesh);
   });
 
-  // --- Load Brian, fully automatic orientation ---
+  // --- Load Brian, auto-orient with verbose logging and axis helpers ---
   async function loadBrianModel() {
     const loader = new GLTFLoader();
     const url = './Brian_Final.glb';
@@ -92,19 +92,19 @@ async function init3D() {
       const gltf = await loader.loadAsync(url);
       console.log('✅ GLTF loaded');
 
-      // 1. Wrap original scene
       const modelRoot = new THREE.Group();
       modelRoot.add(gltf.scene);
 
-      // 2. Measure raw bounding box to find the height axis
+      // Raw bounding box
       modelRoot.updateMatrixWorld();
       const rawBox = new THREE.Box3().setFromObject(modelRoot);
       const rawSize = new THREE.Vector3();
       rawBox.getSize(rawSize);
-      console.log('📦 Raw bounding box size (X, Y, Z):', rawSize);
+      console.log('📦 Raw bounding box size (X, Y, Z):', rawSize.x, rawSize.y, rawSize.z);
+      console.log('   Raw min:', rawBox.min, 'max:', rawBox.max);
 
       const { x: dx, y: dy, z: dz } = rawSize;
-      let heightAxis = 'y'; // assume Y is up
+      let heightAxis = 'y';
       let standRotation = null;
 
       if (dz >= dy && dz >= dx) {
@@ -113,17 +113,16 @@ async function init3D() {
         console.log('🔄 Height axis is Z, rotating -90° around X');
       } else if (dx >= dy && dx >= dz) {
         heightAxis = 'x';
-        standRotation = new THREE.Euler(0, 0, -Math.PI / 2); // rotate X to Y
+        standRotation = new THREE.Euler(0, 0, -Math.PI / 2);
         console.log('🔄 Height axis is X, rotating -90° around Z');
       } else {
         console.log('🔄 Height axis already Y, no rotation needed');
       }
 
-      // Apply stand rotation if needed
+      // Apply stand rotation
       if (standRotation) {
         const rotator = new THREE.Group();
         rotator.rotation.copy(standRotation);
-        // move all current children of modelRoot into rotator
         while (modelRoot.children.length) {
           rotator.add(modelRoot.children[0]);
         }
@@ -131,22 +130,12 @@ async function init3D() {
         modelRoot.updateMatrixWorld();
       }
 
-      // 3. After making the model stand upright, check if it's upside‑down
+      // Upright bounding box
       const uprightBox = new THREE.Box3().setFromObject(modelRoot);
-      const uprightSize = new THREE.Vector3();
-      uprightBox.getSize(uprightSize);
-      console.log('📦 Upright bounding box size (Y should be height):', uprightSize);
+      console.log('📦 Upright box min/max Y:', uprightBox.min.y, uprightBox.max.y);
 
-      // We assume the model's feet should be at min Y (ground). If the bounding box is taller above the center than below, it's probably right-side up.
-      // But a simpler, robust heuristic: compare the original min Z (feet in the raw model) transformed by the rotation matrix.
-      // Instead, we'll just check if the upright bounding box min Y is extremely close to 0 (feet) or max Y is near the height (head).
-      // The model's feet should be at min Y after the correct orientation.
-      // If the upright model's bounding box center is not at the middle, we can't be sure.
-      // Let's just check if the upright model's extent in Y is asymmetrical: if min Y is much closer to 0 than max Y is to the top? Not reliable.
-
-      // We'll use a different trick: after rotation, the original feet point (rawBox.min.z) should now be at min Y.
-      // Compute where rawBox.min.z goes after the rotation.
-      const originalFeet = new THREE.Vector3(0, 0, rawBox.min.z); // assuming feet are at min Z in the raw model
+      // Check for upside-down using original feet point
+      const originalFeet = new THREE.Vector3(0, 0, rawBox.min.z);
       if (standRotation) {
         const m = new THREE.Matrix4().makeRotationFromEuler(standRotation);
         originalFeet.applyMatrix4(m);
@@ -154,7 +143,6 @@ async function init3D() {
       const predictedFeetY = originalFeet.y;
       console.log('🔍 Predicted feet Y after rotation:', predictedFeetY);
 
-      // If predictedFeetY is near uprightBox.max.y, the model is upside‑down → flip 180° around X
       if (predictedFeetY > uprightBox.max.y - 0.1) {
         console.log('🙃 Model is upside‑down, flipping 180° around X');
         const flipper = new THREE.Group();
@@ -166,12 +154,13 @@ async function init3D() {
         modelRoot.updateMatrixWorld();
       }
 
-      // 4. Now the model is upright and right-side up. Get final bounding box.
+      // Final bounding box
       const finalBox = new THREE.Box3().setFromObject(modelRoot);
       const finalSize = new THREE.Vector3();
       finalBox.getSize(finalSize);
-      console.log('📦 Final bounding box size (Y is height):', finalSize);
+      console.log('📦 Final box min/max Y:', finalBox.min.y, finalBox.max.y, 'height:', finalSize.y);
 
+      // Scale to 1.8m
       const currentHeight = finalSize.y;
       const desiredHeight = 1.8;
       if (currentHeight > 0.001) {
@@ -182,14 +171,14 @@ async function init3D() {
         console.warn('⚠️ Brian height is zero – using scale 1');
       }
 
-      // 5. Shift feet to ground (min Y = 0)
+      // Shift feet to ground
       modelRoot.updateMatrixWorld();
       const groundBox = new THREE.Box3().setFromObject(modelRoot);
       const feetY = groundBox.min.y;
       console.log('🦶 Feet Y before ground shift:', feetY);
       modelRoot.position.y = -feetY;
 
-      // 6. Apply alabaster material
+      // Apply alabaster material
       modelRoot.traverse((child) => {
         if (child.isMesh) {
           child.material = new THREE.MeshStandardMaterial({
@@ -203,7 +192,11 @@ async function init3D() {
         }
       });
 
-      console.log('✅ Brian fully auto‑oriented and ready');
+      // Add axis helper to the template itself (will appear on each clone)
+      const axes = new THREE.AxesHelper(1.5);
+      modelRoot.add(axes);
+
+      console.log('✅ Brian ready (axes added: red=X, green=Y, blue=Z)');
       return modelRoot;
     } catch (err) {
       console.error('❌ Brian load failed:', err.message, err);
