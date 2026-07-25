@@ -89,7 +89,7 @@ async function init3D() {
     scene.add(mesh);
   });
 
-  // --- Load and prepare Brian ---
+  // --- Load Brian and prepare a template that stands upright with feet on ground ---
   async function loadBrianModel() {
     const loader = new GLTFLoader();
     const url = './Brian_Baked.glb';
@@ -100,13 +100,12 @@ async function init3D() {
       });
       console.log('✅ GLTF loaded');
 
-      // Wrap the entire loaded scene so we can manipulate it safely
-      const wrapper = new THREE.Group();
-      wrapper.name = 'BrianWrapper';
-      wrapper.add(gltf.scene);
+      // 1. Wrap the whole scene to apply materials and scaling
+      const modelGroup = new THREE.Group();
+      modelGroup.add(gltf.scene);
 
-      // Override all materials with alabaster
-      wrapper.traverse((child) => {
+      // Alabaster material override
+      modelGroup.traverse((child) => {
         if (child.isMesh) {
           child.material = new THREE.MeshStandardMaterial({
             color: 0xf5f0eb,
@@ -119,33 +118,47 @@ async function init3D() {
         }
       });
 
-      // Measure bounding box (before rotation) – model is Z-up
-      const box = new THREE.Box3().setFromObject(wrapper);
+      // 2. Measure original size (model is Z-up, so height = size.z)
+      const box = new THREE.Box3().setFromObject(modelGroup);
       const size = new THREE.Vector3();
       box.getSize(size);
-      const currentHeight = size.z;   // height along the model's "up" (Z)
-      const desiredHeight = 1.8;      // metres
+      const currentHeight = size.z;
+      const desiredHeight = 1.8;   // metres
       if (currentHeight > 0) {
         const scale = desiredHeight / currentHeight;
-        wrapper.scale.set(scale, scale, scale);
+        modelGroup.scale.set(scale, scale, scale);
         console.log(`📏 Brian scaled: ${currentHeight.toFixed(2)} → ${desiredHeight}m (factor ${scale.toFixed(3)})`);
       } else {
         console.warn('⚠️ Brian height is zero – using scale 1');
-        wrapper.scale.set(1, 1, 1);
+        modelGroup.scale.set(1, 1, 1);
       }
 
-      // Rotate to convert Z-up to Y-up (standing upright)
-      wrapper.rotation.x = -Math.PI / 2;
+      // 3. Shift model so feet are at local origin (min Z = 0 after scaling)
+      modelGroup.updateMatrixWorld(); // make sure bounding box is updated
+      const boxAfterScale = new THREE.Box3().setFromObject(modelGroup);
+      const bottomZ = boxAfterScale.min.z; // feet in Z-up orientation
+      modelGroup.position.z = -bottomZ;    // bring feet to Z=0
 
-      console.log('✅ Brian ready (baked pose, upright, no skeleton)');
-      return wrapper;
+      // 4. Create upright group: rotates model from Z-up to Y-up (standing)
+      const uprightGroup = new THREE.Group();
+      uprightGroup.name = 'Upright';
+      uprightGroup.rotation.x = Math.PI / 2;  // correct rotation
+      uprightGroup.add(modelGroup);
+
+      // 5. Root template group – will be cloned per actor
+      const template = new THREE.Group();
+      template.name = 'BrianTemplate';
+      template.add(uprightGroup);
+
+      console.log('✅ Brian template ready (feet on ground, upright, no skeleton)');
+      return template;
     } catch (err) {
       console.error('❌ Brian load failed:', err);
       return null;
     }
   }
 
-  const brianModel = await loadBrianModel();
+  const brianTemplate = await loadBrianModel();
   const actorMeshes = new Map();
   const propMeshes = new Map();
   window.__scene = scene;
@@ -170,49 +183,49 @@ async function init3D() {
 
     state.items.forEach(it => {
       if (it.type === 'actor') {
-        let g = actorMeshes.get(it.id);
-        if (!g) {
-          if (brianModel) {
-            g = brianModel.clone(true);
-            g.userData = { isBrian: true, actorId: it.id };
-            scene.add(g);
-            actorMeshes.set(it.id, g);
+        let actorGroup = actorMeshes.get(it.id);
+        if (!actorGroup) {
+          if (brianTemplate) {
+            actorGroup = brianTemplate.clone(true);
+            actorGroup.userData = { isBrian: true, actorId: it.id };
+            scene.add(actorGroup);
+            actorMeshes.set(it.id, actorGroup);
           } else {
             console.warn(`⚠️ No Brian model – fallback box for actor ${it.id}`);
             const geo = new THREE.BoxGeometry(0.6, 1.8, 0.4);
             const mat = new THREE.MeshStandardMaterial({ color: 0x8888ff });
-            g = new THREE.Mesh(geo, mat);
-            g.castShadow = true;
-            g.receiveShadow = true;
-            g.userData = { isBrian: false, actorId: it.id };
-            scene.add(g);
-            actorMeshes.set(it.id, g);
+            const box = new THREE.Mesh(geo, mat);
+            box.castShadow = true;
+            box.receiveShadow = true;
+            box.userData = { isBrian: false, actorId: it.id };
+            scene.add(box);
+            actorMeshes.set(it.id, box);
+            actorGroup = box;
           }
         }
 
-        // Lift by half his height so feet touch the ground (wrapper origin at centre)
-        const pos = worldToThree(it.x, it.y, 0.0);
-        g.position.copy(pos);
+        // Position at actor's world coordinates (feet on ground)
+        const pos = worldToThree(it.x, it.y, 0);
+        actorGroup.position.copy(pos);
 
-        // Apply facing rotation
+        // Facing direction – rotate around world Y axis
         const facingRad = it.facing * state.D2R;
-        g.rotation.y = -facingRad + Math.PI / 2;
+        actorGroup.rotation.y = -facingRad + Math.PI / 2;
 
-        // No additional scaling – the wrapper already has the correct height
-        g.updateMatrixWorld(true);
+        actorGroup.updateMatrixWorld(true);
       } else {
-        // Props (cuboid as before)
-        let m = propMeshes.get(it.id);
-        if (!m) {
+        // Props (cuboid)
+        let propMesh = propMeshes.get(it.id);
+        if (!propMesh) {
           const geo = new THREE.BoxGeometry(it.w, it.h, it.w * 0.7);
           const mat = new THREE.MeshStandardMaterial({ color: it.color, roughness: 0.7 });
-          m = new THREE.Mesh(geo, mat);
-          m.castShadow = true;
-          m.receiveShadow = true;
-          scene.add(m);
-          propMeshes.set(it.id, m);
+          propMesh = new THREE.Mesh(geo, mat);
+          propMesh.castShadow = true;
+          propMesh.receiveShadow = true;
+          scene.add(propMesh);
+          propMeshes.set(it.id, propMesh);
         }
-        m.position.copy(worldToThree(it.x, it.y, it.h / 2));
+        propMesh.position.copy(worldToThree(it.x, it.y, it.h / 2));
       }
     });
   }
