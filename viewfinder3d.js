@@ -1,5 +1,5 @@
 // ===== Progressive-enhancement 3D viewfinder =====
-// Assumes a Y-up .glb (exported from Blender with "+Y Up" option)
+// Assumes a Y-up .glb (you already exported with +Y Up)
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
@@ -52,8 +52,13 @@ async function init3D() {
   mainLight.shadow.camera.bottom = -20;
   scene.add(mainLight);
 
-  scene.add(new THREE.DirectionalLight(0x8888ff, 0.3).translateX(-10).translateY(5).translateZ(-10));
-  scene.add(new THREE.DirectionalLight(0xffffff, 0.2).translateZ(-20).translateY(10));
+  const fillLight = new THREE.DirectionalLight(0x8888ff, 0.3);
+  fillLight.position.set(-10, 5, -10);
+  scene.add(fillLight);
+
+  const rimLight = new THREE.DirectionalLight(0xffffff, 0.2);
+  rimLight.position.set(0, 10, -20);
+  scene.add(rimLight);
 
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(80, 80),
@@ -63,7 +68,7 @@ async function init3D() {
   ground.receiveShadow = true;
   scene.add(ground);
 
-  // Vignette panels (unchanged)
+  // Vignette panels
   Object.entries(state.V).forEach(([name, ang]) => {
     const rad = ang * state.D2R;
     const center = state.pt(ang, state.R_VIGNETTE);
@@ -79,21 +84,21 @@ async function init3D() {
     scene.add(mesh);
   });
 
-  // --- Load Brian (Y-up model) ---
+  // --- Load Brian (already Y‑up, just scale and put feet on ground) ---
   async function loadBrianModel() {
     const loader = new GLTFLoader();
-    const url = './Brian_YUp.glb';   // <-- your re-exported file
+    const url = './Brian_Baked.glb';   // <-- your actual file name
     console.log('🔄 Loading Brian from:', url);
     try {
       const gltf = await loader.loadAsync(url);
-      console.log('✅ GLTF loaded');
+      console.log('✅ GLTF loaded, scene type:', gltf.scene.type);
+      console.log('   gltf.scene children:', gltf.scene.children.length);
 
-      // Root group to hold the whole actor
       const brianRoot = new THREE.Group();
       brianRoot.name = 'BrianRoot';
       brianRoot.add(gltf.scene);
 
-      // Apply alabaster material to all meshes
+      // Override materials to alabaster
       brianRoot.traverse((child) => {
         if (child.isMesh) {
           child.material = new THREE.MeshStandardMaterial({
@@ -107,35 +112,38 @@ async function init3D() {
         }
       });
 
-      // Measure height along Y (model is already Y-up)
+      // Measure height along Y (model is Y‑up)
       const box = new THREE.Box3().setFromObject(brianRoot);
       const size = new THREE.Vector3();
       box.getSize(size);
-      const currentHeight = size.y;   // height along Y
-      const desiredHeight = 1.8;      // metres
-      if (currentHeight > 0) {
+      console.log('📦 Bounding box size:', size);
+      const currentHeight = size.y;
+      const desiredHeight = 1.8;
+      if (currentHeight > 0.001) {
         const scale = desiredHeight / currentHeight;
         brianRoot.scale.set(scale, scale, scale);
-        console.log(`📏 Brian scaled: ${currentHeight.toFixed(2)} → ${desiredHeight}m`);
+        console.log(`📏 Brian scaled: ${currentHeight.toFixed(2)} → ${desiredHeight}m (factor ${scale.toFixed(3)})`);
       } else {
-        console.warn('⚠️ Brian height is zero – using scale 1');
+        console.warn('⚠️ Brian height is nearly zero – using scale 1');
       }
 
-      // Shift so feet are at Y=0 (min Y => 0)
+      // Shift so feet are at y=0 (min Y becomes 0)
       brianRoot.updateMatrixWorld();
       const boxAfterScale = new THREE.Box3().setFromObject(brianRoot);
       const feetY = boxAfterScale.min.y;
-      brianRoot.position.y = -feetY;   // lift to ground
+      console.log('🦶 Feet Y before shift:', feetY);
+      brianRoot.position.y = -feetY;
 
-      console.log('✅ Brian ready (feet on ground, Y-up)');
+      console.log('✅ Brian ready (feet on ground, Y-up, height 1.8m)');
       return brianRoot;
     } catch (err) {
-      console.error('❌ Brian load failed:', err);
+      console.error('❌ Brian load failed:', err.message, err);
       return null;
     }
   }
 
   const brianTemplate = await loadBrianModel();
+  console.log('🧑‍🎨 Brian template is null?', brianTemplate === null);
   const actorMeshes = new Map();
   const propMeshes = new Map();
   window.__scene = scene;
@@ -156,8 +164,10 @@ async function init3D() {
             actorGroup.userData = { isBrian: true, actorId: it.id };
             scene.add(actorGroup);
             actorMeshes.set(it.id, actorGroup);
+            console.log(`➕ Added Brian for actor ${it.id}`);
           } else {
-            // Fallback box
+            // Fallback purple box
+            console.warn(`⚠️ No Brian model – fallback box for actor ${it.id}`);
             const geo = new THREE.BoxGeometry(0.6, 1.8, 0.4);
             const mat = new THREE.MeshStandardMaterial({ color: 0x8888ff });
             const box = new THREE.Mesh(geo, mat);
@@ -169,10 +179,10 @@ async function init3D() {
           }
         }
 
-        // Position at world coordinates (feet already at ground level inside the group)
+        // Position at world coordinates (feet already at ground)
         actorGroup.position.copy(worldToThree(it.x, it.y, 0));
 
-        // Facing – rotate only the root group around world Y
+        // Facing rotation
         const facingRad = it.facing * state.D2R;
         actorGroup.rotation.y = -facingRad + Math.PI / 2;
 
@@ -223,8 +233,10 @@ async function init3D() {
 
   let use3dActive = true;
   function frameLoop() {
-    if (use3dActive && window.Previz3DRender) requestAnimationFrame(() => { window.Previz3DRender(); frameLoop(); });
-    else requestAnimationFrame(frameLoop);
+    if (use3dActive && window.Previz3DRender) {
+      window.Previz3DRender();
+    }
+    requestAnimationFrame(frameLoop);
   }
 
   const toggleChangeHandler = () => {
