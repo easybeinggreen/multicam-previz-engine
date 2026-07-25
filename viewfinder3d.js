@@ -191,7 +191,7 @@ async function init3D() {
         }
 
         // Lift by half his height so feet touch the ground (wrapper origin at centre)
-        const pos = worldToThree(it.x, it.y, 0.9);
+        const pos = worldToThree(it.x, it.y, 0.0);
         g.position.copy(pos);
 
         // Apply facing rotation
