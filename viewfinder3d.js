@@ -83,22 +83,83 @@ async function init3D() {
     scene.add(mesh);
   });
 
-  // --- Load Brian (already upright, no flip needed) ---
+  // --- Load Brian, auto-detect upright orientation ---
   async function loadBrianModel() {
     const loader = new GLTFLoader();
-    const url = './Brian_Final.glb';   // <-- new file
+    const url = './Brian_Final.glb';
     console.log('🔄 Loading Brian from:', url);
     try {
       const gltf = await loader.loadAsync(url);
       console.log('✅ GLTF loaded');
 
-      // Wrap the scene for easy manipulation
-      const brianRoot = new THREE.Group();
-      brianRoot.name = 'BrianRoot';
-      brianRoot.add(gltf.scene);
+      // Wrap the original scene
+      const modelGroup = new THREE.Group();
+      modelGroup.add(gltf.scene);
+
+      // Measure raw bounding box
+      modelGroup.updateMatrixWorld();
+      const rawBox = new THREE.Box3().setFromObject(modelGroup);
+      const rawSize = new THREE.Vector3();
+      rawBox.getSize(rawSize);
+      console.log('📦 Raw bounding box size (X,Y,Z):', rawSize);
+
+      // Find the longest axis -> that's the character's height
+      const { x: dx, y: dy, z: dz } = rawSize;
+      let rotation = null;
+      let heightIndex = -1;
+
+      if (dx >= dy && dx >= dz) {
+        // Height is along X
+        heightIndex = 0;
+        rotation = new THREE.Euler(0, 0, -Math.PI / 2); // X -> Y (rotate -90° around Z)
+        console.log('🔄 Height axis detected as X, will rotate -90° around Z');
+      } else if (dy >= dx && dy >= dz) {
+        // Height is already along Y
+        heightIndex = 1;
+        rotation = null; // no rotation needed
+        console.log('🔄 Height axis already Y, no rotation needed');
+      } else {
+        // Height is along Z
+        heightIndex = 2;
+        rotation = new THREE.Euler(-Math.PI / 2, 0, 0); // Z -> Y (rotate -90° around X)
+        console.log('🔄 Height axis detected as Z, will rotate -90° around X');
+      }
+
+      // Apply the rotation if needed
+      if (rotation) {
+        const rotator = new THREE.Group();
+        rotator.rotation.copy(rotation);
+        // Move the model inside the rotator
+        rotator.add(modelGroup.children[0]); // extract the original scene from modelGroup
+        modelGroup.add(rotator);
+      }
+
+      // Now measure again (after rotation) to get upright height and feet position
+      modelGroup.updateMatrixWorld();
+      const uprightBox = new THREE.Box3().setFromObject(modelGroup);
+      const uprightSize = new THREE.Vector3();
+      uprightBox.getSize(uprightSize);
+      console.log('📦 Upright bounding box size (Y should be height):', uprightSize);
+
+      const currentHeight = uprightSize.y;
+      const desiredHeight = 1.8;
+      if (currentHeight > 0.001) {
+        const scale = desiredHeight / currentHeight;
+        modelGroup.scale.set(scale, scale, scale);
+        console.log(`📏 Brian scaled: ${currentHeight.toFixed(2)} → ${desiredHeight}m`);
+      } else {
+        console.warn('⚠️ Brian height is zero – using scale 1');
+      }
+
+      // Shift feet to ground (min Y = 0)
+      modelGroup.updateMatrixWorld();
+      const boxAfterScale = new THREE.Box3().setFromObject(modelGroup);
+      const feetY = boxAfterScale.min.y;
+      console.log('🦶 Feet Y before shift:', feetY);
+      modelGroup.position.y = -feetY;
 
       // Alabaster material override
-      brianRoot.traverse((child) => {
+      modelGroup.traverse((child) => {
         if (child.isMesh) {
           child.material = new THREE.MeshStandardMaterial({
             color: 0xf5f0eb,
@@ -111,30 +172,8 @@ async function init3D() {
         }
       });
 
-      // Measure height along Y (model is upright)
-      const box = new THREE.Box3().setFromObject(brianRoot);
-      const size = new THREE.Vector3();
-      box.getSize(size);
-      console.log('📦 Bounding box size (should show Y as height):', size);
-      const currentHeight = size.y;
-      const desiredHeight = 1.8;
-      if (currentHeight > 0.001) {
-        const scale = desiredHeight / currentHeight;
-        brianRoot.scale.set(scale, scale, scale);
-        console.log(`📏 Brian scaled: ${currentHeight.toFixed(2)} → ${desiredHeight}m`);
-      } else {
-        console.warn('⚠️ Brian height is zero – using scale 1');
-      }
-
-      // Shift so feet (min Y) are on the ground (Y=0)
-      brianRoot.updateMatrixWorld();
-      const boxAfterScale = new THREE.Box3().setFromObject(brianRoot);
-      const feetY = boxAfterScale.min.y;
-      console.log('🦶 Feet Y before shift:', feetY);
-      brianRoot.position.y = -feetY;
-
-      console.log('✅ Brian ready (right‑side up, feet on ground)');
-      return brianRoot;
+      console.log('✅ Brian auto-oriented and ready');
+      return modelGroup;
     } catch (err) {
       console.error('❌ Brian load failed:', err.message, err);
       return null;
