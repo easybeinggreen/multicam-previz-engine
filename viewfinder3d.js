@@ -89,7 +89,7 @@ async function init3D() {
     scene.add(mesh);
   });
 
-  // --- Build static Brian model (baked pose, auto‑scaled) ---
+  // --- Load and prepare Brian ---
   async function loadBrianModel() {
     const loader = new GLTFLoader();
     const url = './Brian_Baked.glb';
@@ -99,55 +99,46 @@ async function init3D() {
         loader.load(url, resolve, undefined, reject);
       });
       console.log('✅ GLTF loaded');
-      const original = gltf.scene;
 
-      const staticGroup = new THREE.Group();
-      staticGroup.name = 'BrianStatic';
+      // Wrap the entire loaded scene so we can manipulate it safely
+      const wrapper = new THREE.Group();
+      wrapper.name = 'BrianWrapper';
+      wrapper.add(gltf.scene);
 
-      const alabasterMat = new THREE.MeshStandardMaterial({
-        color: 0xf5f0eb,
-        roughness: 0.9,
-        metalness: 0.0,
-        emissive: new THREE.Color(0x000000),
-      });
-
-      // Collect all meshes (now they are static, not skinned)
-      const meshes = [];
-      original.traverse((child) => {
+      // Override all materials with alabaster
+      wrapper.traverse((child) => {
         if (child.isMesh) {
-          meshes.push(child);
+          child.material = new THREE.MeshStandardMaterial({
+            color: 0xf5f0eb,
+            roughness: 0.9,
+            metalness: 0.0,
+            emissive: new THREE.Color(0x000000),
+          });
+          child.castShadow = true;
+          child.receiveShadow = true;
         }
       });
 
-      meshes.forEach((srcMesh) => {
-        const geo = srcMesh.geometry.clone();
-        const mat = alabasterMat.clone();
-        const newMesh = new THREE.Mesh(geo, mat);
-        newMesh.castShadow = true;
-        newMesh.receiveShadow = true;
-        staticGroup.add(newMesh);
-      });
-
-      // --- Auto‑scale to exactly 1.8 metres tall ---
-      const box = new THREE.Box3().setFromObject(staticGroup);
+      // Measure bounding box (before rotation) – model is Z-up
+      const box = new THREE.Box3().setFromObject(wrapper);
       const size = new THREE.Vector3();
       box.getSize(size);
-      const currentHeight = size.y;
-      const desiredHeight = 1.8; // metres
+      const currentHeight = size.z;   // height along the model's "up" (Z)
+      const desiredHeight = 1.8;      // metres
       if (currentHeight > 0) {
         const scale = desiredHeight / currentHeight;
-        staticGroup.scale.set(scale, scale, scale);
+        wrapper.scale.set(scale, scale, scale);
         console.log(`📏 Brian scaled: ${currentHeight.toFixed(2)} → ${desiredHeight}m (factor ${scale.toFixed(3)})`);
       } else {
         console.warn('⚠️ Brian height is zero – using scale 1');
-        staticGroup.scale.set(1, 1, 1);
+        wrapper.scale.set(1, 1, 1);
       }
 
-      // After scaling, rotate to make Brian stand upright (Z‑up to Y‑up)
-      staticGroup.rotation.x = -Math.PI / 2;
+      // Rotate to convert Z-up to Y-up (standing upright)
+      wrapper.rotation.x = -Math.PI / 2;
 
-      console.log('✅ Static Brian ready (baked pose, no skeleton)');
-      return staticGroup;
+      console.log('✅ Brian ready (baked pose, upright, no skeleton)');
+      return wrapper;
     } catch (err) {
       console.error('❌ Brian load failed:', err);
       return null;
@@ -199,7 +190,7 @@ async function init3D() {
           }
         }
 
-        // Apply world position
+        // Lift by half his height so feet touch the ground (wrapper origin at centre)
         const pos = worldToThree(it.x, it.y, 0.9);
         g.position.copy(pos);
 
@@ -207,10 +198,10 @@ async function init3D() {
         const facingRad = it.facing * state.D2R;
         g.rotation.y = -facingRad + Math.PI / 2;
 
-        // NO hard‑coded scaling – Brian's group already has the correct 1.8m height
+        // No additional scaling – the wrapper already has the correct height
         g.updateMatrixWorld(true);
       } else {
-        // Props (unchanged – still cuboid as before)
+        // Props (cuboid as before)
         let m = propMeshes.get(it.id);
         if (!m) {
           const geo = new THREE.BoxGeometry(it.w, it.h, it.w * 0.7);
