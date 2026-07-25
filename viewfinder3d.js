@@ -83,25 +83,19 @@ async function init3D() {
     scene.add(mesh);
   });
 
-  // --- Load Brian (already Y‑up, just flipped upright and scaled) ---
+  // --- Load Brian (already upright, no flip needed) ---
   async function loadBrianModel() {
     const loader = new GLTFLoader();
-    const url = './Brian_Baked.glb';
+    const url = './Brian_Final.glb';   // <-- new file
     console.log('🔄 Loading Brian from:', url);
     try {
       const gltf = await loader.loadAsync(url);
-      console.log('✅ GLTF loaded, scene children:', gltf.scene.children.length);
+      console.log('✅ GLTF loaded');
 
-      // The exported file is Y‑up, but feet are at max Y and head at min Y.
-      // Group that flips the model 180° around X so feet go to min Y.
-      const flipGroup = new THREE.Group();
-      flipGroup.rotation.x = Math.PI;   // vertical flip
-      flipGroup.add(gltf.scene);
-
-      // Root template (cloned per actor)
+      // Wrap the scene for easy manipulation
       const brianRoot = new THREE.Group();
       brianRoot.name = 'BrianRoot';
-      brianRoot.add(flipGroup);
+      brianRoot.add(gltf.scene);
 
       // Alabaster material override
       brianRoot.traverse((child) => {
@@ -117,30 +111,29 @@ async function init3D() {
         }
       });
 
-      // Measure height along Y after flip (Y should still be the up axis)
-      flipGroup.updateMatrixWorld();
-      const box = new THREE.Box3().setFromObject(flipGroup);
+      // Measure height along Y (model is upright)
+      const box = new THREE.Box3().setFromObject(brianRoot);
       const size = new THREE.Vector3();
       box.getSize(size);
-      console.log('📦 Flipped bounding box size:', size);
+      console.log('📦 Bounding box size (should show Y as height):', size);
       const currentHeight = size.y;
       const desiredHeight = 1.8;
       if (currentHeight > 0.001) {
         const scale = desiredHeight / currentHeight;
-        flipGroup.scale.set(scale, scale, scale);
-        console.log(`📏 Brian scaled: ${currentHeight.toFixed(2)} → ${desiredHeight}m (factor ${scale.toFixed(3)})`);
+        brianRoot.scale.set(scale, scale, scale);
+        console.log(`📏 Brian scaled: ${currentHeight.toFixed(2)} → ${desiredHeight}m`);
       } else {
-        console.warn('⚠️ Brian height is nearly zero – using scale 1');
+        console.warn('⚠️ Brian height is zero – using scale 1');
       }
 
-      // After flip, feet are at min Y. Shift so feet touch ground (min Y = 0)
-      flipGroup.updateMatrixWorld();
-      const boxAfterScale = new THREE.Box3().setFromObject(flipGroup);
+      // Shift so feet (min Y) are on the ground (Y=0)
+      brianRoot.updateMatrixWorld();
+      const boxAfterScale = new THREE.Box3().setFromObject(brianRoot);
       const feetY = boxAfterScale.min.y;
       console.log('🦶 Feet Y before shift:', feetY);
-      flipGroup.position.y = -feetY;
+      brianRoot.position.y = -feetY;
 
-      console.log('✅ Brian ready (upright, right-side up, height 1.8m)');
+      console.log('✅ Brian ready (right‑side up, feet on ground)');
       return brianRoot;
     } catch (err) {
       console.error('❌ Brian load failed:', err.message, err);
