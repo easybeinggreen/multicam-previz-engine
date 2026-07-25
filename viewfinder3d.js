@@ -83,7 +83,7 @@ async function init3D() {
     scene.add(mesh);
   });
 
-  // --- Load Brian, apply materials, scale to 1.8m, fix orientation ---
+  // --- Load Brian, apply materials, scale to 1.8m, stand upright, flip if upside down ---
   async function loadBrianModel() {
     const loader = new GLTFLoader();
     const url = './Brian_Baked.glb';
@@ -92,17 +92,21 @@ async function init3D() {
       const gltf = await loader.loadAsync(url);
       console.log('✅ GLTF loaded, scene children:', gltf.scene.children.length);
 
-      // This group will be rotated to make the body upright
+      // Group that rotates model so body (Z) becomes vertical (Y)
       const bodyAligner = new THREE.Group();
-      // ***** THE FIX ***** : rotate -90° around X so that Z (blue) becomes Y (green)
-      const STAND_UP_ROTATION = new THREE.Euler(-Math.PI / 2, 0, 0);
-      bodyAligner.rotation.copy(STAND_UP_ROTATION);
+      // -90° around X: Z (blue) → Y (green), so body stands upright
+      bodyAligner.rotation.x = -Math.PI / 2;
       bodyAligner.add(gltf.scene);
 
-      // Root group (cloned per actor)
+      // Group to flip right-side up if needed (180° around Y)
+      const flipGroup = new THREE.Group();
+      flipGroup.rotation.y = Math.PI;   // flip around vertical axis
+      flipGroup.add(bodyAligner);
+
+      // Root template (cloned per actor)
       const brianRoot = new THREE.Group();
       brianRoot.name = 'BrianRoot';
-      brianRoot.add(bodyAligner);
+      brianRoot.add(flipGroup);
 
       // Alabaster material override
       brianRoot.traverse((child) => {
@@ -118,30 +122,30 @@ async function init3D() {
         }
       });
 
-      // Measure the bodyAligner (after rotation) to get its bounding box
-      bodyAligner.updateMatrixWorld();
-      const box = new THREE.Box3().setFromObject(bodyAligner);
+      // Measure the upright body (inside flipGroup) to get height
+      flipGroup.updateMatrixWorld();
+      const box = new THREE.Box3().setFromObject(flipGroup);
       const size = new THREE.Vector3();
       box.getSize(size);
-      console.log('📦 Body aligner bounding box size:', size);
-      const currentHeight = size.y;   // height along world Y (after rotation)
+      console.log('📦 Upright bounding box size:', size);
+      const currentHeight = size.y;   // height along world Y
       const desiredHeight = 1.8;
       if (currentHeight > 0.001) {
         const scale = desiredHeight / currentHeight;
-        bodyAligner.scale.set(scale, scale, scale);
+        flipGroup.scale.set(scale, scale, scale);  // scale the flipGroup so feet shift remains correct
         console.log(`📏 Brian scaled: ${currentHeight.toFixed(2)} → ${desiredHeight}m (factor ${scale.toFixed(3)})`);
       } else {
         console.warn('⚠️ Brian height is nearly zero – using scale 1');
       }
 
       // Shift feet to ground (min Y = 0)
-      bodyAligner.updateMatrixWorld();
-      const boxAfterScale = new THREE.Box3().setFromObject(bodyAligner);
+      flipGroup.updateMatrixWorld();
+      const boxAfterScale = new THREE.Box3().setFromObject(flipGroup);
       const feetY = boxAfterScale.min.y;
       console.log('🦶 Feet Y before shift:', feetY);
-      bodyAligner.position.y = -feetY;   // move within brianRoot
+      flipGroup.position.y = -feetY;   // lift so feet touch ground
 
-      console.log('✅ Brian ready (feet on ground, height 1.8m)');
+      console.log('✅ Brian ready (upright, right-side up, height 1.8m)');
       return brianRoot;
     } catch (err) {
       console.error('❌ Brian load failed:', err.message, err);
@@ -170,7 +174,7 @@ async function init3D() {
             actorGroup = brianTemplate.clone(true);
             actorGroup.userData = { isBrian: true, actorId: it.id };
 
-            // Show axes on each clone for debugging (remove when satisfied)
+            // Axis helper (remove this block after confirmation)
             const axes = new THREE.AxesHelper(1.0);
             actorGroup.add(axes);
 
