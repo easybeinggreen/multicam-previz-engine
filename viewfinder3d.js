@@ -83,7 +83,7 @@ async function init3D() {
     scene.add(mesh);
   });
 
-  // --- Load Brian, auto‑orient, scale, and ground ---
+  // --- Load Brian, fully automatic orientation ---
   async function loadBrianModel() {
     const loader = new GLTFLoader();
     const url = './Brian_Final.glb';
@@ -96,86 +96,82 @@ async function init3D() {
       const modelRoot = new THREE.Group();
       modelRoot.add(gltf.scene);
 
-      // 2. Measure raw bounding box
+      // 2. Measure raw bounding box to find the height axis
       modelRoot.updateMatrixWorld();
       const rawBox = new THREE.Box3().setFromObject(modelRoot);
       const rawSize = new THREE.Vector3();
       rawBox.getSize(rawSize);
       console.log('📦 Raw bounding box size (X, Y, Z):', rawSize);
 
-      // 3. Determine which axis is height (largest dimension)
       const { x: dx, y: dy, z: dz } = rawSize;
-      let heightAxis = 'y';
+      let heightAxis = 'y'; // assume Y is up
       let standRotation = null;
 
       if (dz >= dy && dz >= dx) {
         heightAxis = 'z';
-        standRotation = new THREE.Euler(-Math.PI / 2, 0, 0); // Z → Y (rotate -90° around X)
-        console.log('🔄 Height axis is Z, will rotate -90° around X');
+        standRotation = new THREE.Euler(-Math.PI / 2, 0, 0); // rotate Z to Y
+        console.log('🔄 Height axis is Z, rotating -90° around X');
       } else if (dx >= dy && dx >= dz) {
         heightAxis = 'x';
-        standRotation = new THREE.Euler(0, 0, -Math.PI / 2); // X → Y (rotate -90° around Z)
-        console.log('🔄 Height axis is X, will rotate -90° around Z');
+        standRotation = new THREE.Euler(0, 0, -Math.PI / 2); // rotate X to Y
+        console.log('🔄 Height axis is X, rotating -90° around Z');
       } else {
-        console.log('🔄 Height axis already Y, no stand rotation needed');
+        console.log('🔄 Height axis already Y, no rotation needed');
       }
 
-      // Apply stand rotation inside a helper group
+      // Apply stand rotation if needed
       if (standRotation) {
         const rotator = new THREE.Group();
         rotator.rotation.copy(standRotation);
-        // Move all children of modelRoot into rotator
+        // move all current children of modelRoot into rotator
         while (modelRoot.children.length) {
           rotator.add(modelRoot.children[0]);
         }
         modelRoot.add(rotator);
+        modelRoot.updateMatrixWorld();
       }
 
-      // 4. Now check if the model is upside‑down (feet at max Y)
-      modelRoot.updateMatrixWorld();
-      const orientedBox = new THREE.Box3().setFromObject(modelRoot);
-      const orientedSize = new THREE.Vector3();
-      orientedBox.getSize(orientedSize);
-      console.log('📦 Oriented bounding box size:', orientedSize);
+      // 3. After making the model stand upright, check if it's upside‑down
+      const uprightBox = new THREE.Box3().setFromObject(modelRoot);
+      const uprightSize = new THREE.Vector3();
+      uprightBox.getSize(uprightSize);
+      console.log('📦 Upright bounding box size (Y should be height):', uprightSize);
 
-      const headEnd = orientedBox.max.y;   // top of the model after rotation
-      const feetEnd = orientedBox.min.y;
-      // If the taller part is at max Y, it's head up -> correct. If shorter part is at max Y, it's upside‑down.
-      // We assume the character's height is orientedSize.y, and the head should be the larger vertical extent (usually).
-      // A simple heuristic: if the bounding box min Y is closer to 0 than max Y? Not reliable.
-      // Instead, we just check if the model appears upside‑down by testing a known point: after standing,
-      // the model's feet should be at min Y if it was originally Z-up with feet at min Z.
-      // We can directly compare: if the original raw bounding box min Z (feet) becomes max Y after rotation, then flip.
-      const originalMinZ = rawBox.min.z;
-      // Transform that point by the rotation matrix
-      const footPoint = new THREE.Vector3(0, 0, originalMinZ);
+      // We assume the model's feet should be at min Y (ground). If the bounding box is taller above the center than below, it's probably right-side up.
+      // But a simpler, robust heuristic: compare the original min Z (feet in the raw model) transformed by the rotation matrix.
+      // Instead, we'll just check if the upright bounding box min Y is extremely close to 0 (feet) or max Y is near the height (head).
+      // The model's feet should be at min Y after the correct orientation.
+      // If the upright model's bounding box center is not at the middle, we can't be sure.
+      // Let's just check if the upright model's extent in Y is asymmetrical: if min Y is much closer to 0 than max Y is to the top? Not reliable.
+
+      // We'll use a different trick: after rotation, the original feet point (rawBox.min.z) should now be at min Y.
+      // Compute where rawBox.min.z goes after the rotation.
+      const originalFeet = new THREE.Vector3(0, 0, rawBox.min.z); // assuming feet are at min Z in the raw model
       if (standRotation) {
-        const rotMatrix = new THREE.Matrix4().makeRotationFromEuler(standRotation);
-        footPoint.applyMatrix4(rotMatrix);
+        const m = new THREE.Matrix4().makeRotationFromEuler(standRotation);
+        originalFeet.applyMatrix4(m);
       }
-      // footPoint.y is where the original feet would be after rotation.
-      // If footPoint.y is near max Y, the model is upside‑down.
-      const predictedFootY = footPoint.y;
-      console.log('🔍 Predicted foot Y after rotation:', predictedFootY);
+      const predictedFeetY = originalFeet.y;
+      console.log('🔍 Predicted feet Y after rotation:', predictedFeetY);
 
-      if (predictedFootY > orientedBox.max.y - 0.01) {
-        // Feet are at top -> flip 180° around X
+      // If predictedFeetY is near uprightBox.max.y, the model is upside‑down → flip 180° around X
+      if (predictedFeetY > uprightBox.max.y - 0.1) {
         console.log('🙃 Model is upside‑down, flipping 180° around X');
         const flipper = new THREE.Group();
         flipper.rotation.x = Math.PI;
-        // Move everything from modelRoot into flipper
         while (modelRoot.children.length) {
           flipper.add(modelRoot.children[0]);
         }
         modelRoot.add(flipper);
-        // Update bounding box after flip
         modelRoot.updateMatrixWorld();
       }
 
-      // 5. Scale to 1.8 m using the Y dimension
+      // 4. Now the model is upright and right-side up. Get final bounding box.
       const finalBox = new THREE.Box3().setFromObject(modelRoot);
       const finalSize = new THREE.Vector3();
       finalBox.getSize(finalSize);
+      console.log('📦 Final bounding box size (Y is height):', finalSize);
+
       const currentHeight = finalSize.y;
       const desiredHeight = 1.8;
       if (currentHeight > 0.001) {
@@ -186,14 +182,14 @@ async function init3D() {
         console.warn('⚠️ Brian height is zero – using scale 1');
       }
 
-      // 6. Shift feet to ground (min Y = 0)
+      // 5. Shift feet to ground (min Y = 0)
       modelRoot.updateMatrixWorld();
       const groundBox = new THREE.Box3().setFromObject(modelRoot);
       const feetY = groundBox.min.y;
       console.log('🦶 Feet Y before ground shift:', feetY);
       modelRoot.position.y = -feetY;
 
-      // 7. Apply alabaster material to all meshes
+      // 6. Apply alabaster material
       modelRoot.traverse((child) => {
         if (child.isMesh) {
           child.material = new THREE.MeshStandardMaterial({
@@ -207,7 +203,7 @@ async function init3D() {
         }
       });
 
-      console.log('✅ Brian auto‑oriented, scaled, and grounded');
+      console.log('✅ Brian fully auto‑oriented and ready');
       return modelRoot;
     } catch (err) {
       console.error('❌ Brian load failed:', err.message, err);
