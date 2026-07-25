@@ -89,10 +89,10 @@ async function init3D() {
     scene.add(mesh);
   });
 
-  // --- Build static Brian model (skinning stripped) ---
+  // --- Build static Brian model (baked pose, auto‑scaled) ---
   async function loadBrianModel() {
     const loader = new GLTFLoader();
-    const url = './Brian_A_260725.glb';
+    const url = './Brian_Baked.glb';
     console.log('🔄 Loading Brian from:', url);
     try {
       const gltf = await new Promise((resolve, reject) => {
@@ -106,48 +106,44 @@ async function init3D() {
 
       const alabasterMat = new THREE.MeshStandardMaterial({
         color: 0xf5f0eb,
-        roughness: 0.4,
+        roughness: 0.9,
         metalness: 0.0,
-        emissive: new THREE.Color(0x222222),
-        emissiveIntensity: 0.05,
+        emissive: new THREE.Color(0x000000),
       });
 
-      // Collect all meshes (including SkinnedMesh)
+      // Collect all meshes (now they are static, not skinned)
       const meshes = [];
       original.traverse((child) => {
-        if (child.isMesh || child.isSkinnedMesh) {
+        if (child.isMesh) {
           meshes.push(child);
         }
       });
 
       meshes.forEach((srcMesh) => {
         const geo = srcMesh.geometry.clone();
-        // Remove skinning attributes to prevent Three.js from treating as skinned
-        if (geo.attributes.skinIndex) geo.deleteAttribute('skinIndex');
-        if (geo.attributes.skinWeight) geo.deleteAttribute('skinWeight');
-        if (geo.morphAttributes) {
-          for (const key in geo.morphAttributes) {
-            delete geo.morphAttributes[key];
-          }
-        }
-        geo.isSkinnedMesh = false;
-
         const mat = alabasterMat.clone();
         const newMesh = new THREE.Mesh(geo, mat);
-        newMesh.position.set(0, 0, 0);
-        newMesh.rotation.set(0, 0, 0);
-        newMesh.scale.set(1, 1, 1);
         newMesh.castShadow = true;
         newMesh.receiveShadow = true;
         staticGroup.add(newMesh);
       });
 
-      // Scale to achieve ~1.8m height (adjust this factor if needed)
-      // The current factor 0.017 gives a height that looks correct per user feedback.
-      const scaleFactor = 0.017;
-      staticGroup.scale.set(scaleFactor, scaleFactor, scaleFactor);
+      // --- Auto‑scale to exactly 1.8 metres tall ---
+      const box = new THREE.Box3().setFromObject(staticGroup);
+      const size = new THREE.Vector3();
+      box.getSize(size);
+      const currentHeight = size.y;
+      const desiredHeight = 1.8; // metres
+      if (currentHeight > 0) {
+        const scale = desiredHeight / currentHeight;
+        staticGroup.scale.set(scale, scale, scale);
+        console.log(`📏 Brian scaled: ${currentHeight.toFixed(2)} → ${desiredHeight}m (factor ${scale.toFixed(3)})`);
+      } else {
+        console.warn('⚠️ Brian height is zero – using scale 1');
+        staticGroup.scale.set(1, 1, 1);
+      }
 
-      console.log('✅ Static Brian ready (skinning stripped)');
+      console.log('✅ Static Brian ready (baked pose, no skeleton)');
       return staticGroup;
     } catch (err) {
       console.error('❌ Brian load failed:', err);
@@ -188,7 +184,6 @@ async function init3D() {
             scene.add(g);
             actorMeshes.set(it.id, g);
           } else {
-            // Fallback: coloured box (should rarely happen)
             console.warn(`⚠️ No Brian model – fallback box for actor ${it.id}`);
             const geo = new THREE.BoxGeometry(0.6, 1.8, 0.4);
             const mat = new THREE.MeshStandardMaterial({ color: 0x8888ff });
@@ -209,16 +204,10 @@ async function init3D() {
         const facingRad = it.facing * state.D2R;
         g.rotation.y = -facingRad + Math.PI / 2;
 
-        // Uniform scale (all actors same size)
-        if (brianModel) {
-          g.scale.set(0.017, 0.017, 0.017);
-        } else {
-          g.scale.set(1, 1, 1);
-        }
-
+        // NO hard‑coded scaling – Brian's group already has the correct 1.8m height
         g.updateMatrixWorld(true);
       } else {
-        // Props (unchanged, already working)
+        // Props (unchanged – still cuboid as before)
         let m = propMeshes.get(it.id);
         if (!m) {
           const geo = new THREE.BoxGeometry(it.w, it.h, it.w * 0.7);
