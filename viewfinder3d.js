@@ -1,5 +1,5 @@
 // ===== Progressive-enhancement 3D viewfinder =====
-// Assumes a Y-up .glb (you already exported with +Y Up)
+// Assumes a Y-up .glb (+Y Up ticked on export)
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
@@ -84,21 +84,29 @@ async function init3D() {
     scene.add(mesh);
   });
 
-  // --- Load Brian (already Y‑up, just scale and put feet on ground) ---
+  // --- Load Brian and fix orientation ---
   async function loadBrianModel() {
     const loader = new GLTFLoader();
-    const url = './Brian_Baked.glb';   // <-- your actual file name
+    const url = './Brian_Baked.glb';
     console.log('🔄 Loading Brian from:', url);
     try {
       const gltf = await loader.loadAsync(url);
-      console.log('✅ GLTF loaded, scene type:', gltf.scene.type);
-      console.log('   gltf.scene children:', gltf.scene.children.length);
+      console.log('✅ GLTF loaded, scene children:', gltf.scene.children.length);
 
+      // Root that will be cloned per actor and rotated for facing
       const brianRoot = new THREE.Group();
       brianRoot.name = 'BrianRoot';
-      brianRoot.add(gltf.scene);
 
-      // Override materials to alabaster
+      // Orientation correction group – ONLY used to stand him upright if needed.
+      // Change CORRECTIVE_ROTATION_X below to test different angles.
+      const orientationFix = new THREE.Group();
+      const CORRECTIVE_ROTATION_X = 0;   // <-- TRY -Math.PI/2 if Brian appears lying down
+      orientationFix.rotation.x = CORRECTIVE_ROTATION_X;
+      orientationFix.add(gltf.scene);
+
+      brianRoot.add(orientationFix);
+
+      // Override materials
       brianRoot.traverse((child) => {
         if (child.isMesh) {
           child.material = new THREE.MeshStandardMaterial({
@@ -112,29 +120,29 @@ async function init3D() {
         }
       });
 
-      // Measure height along Y (model is Y‑up)
-      const box = new THREE.Box3().setFromObject(brianRoot);
+      // Measure the orientation-fixed group to get real upright height
+      const box = new THREE.Box3().setFromObject(orientationFix);
       const size = new THREE.Vector3();
       box.getSize(size);
-      console.log('📦 Bounding box size:', size);
-      const currentHeight = size.y;
+      console.log('📦 Oriented bounding box size:', size);
+      const currentHeight = size.y;   // height along Y after correction
       const desiredHeight = 1.8;
       if (currentHeight > 0.001) {
         const scale = desiredHeight / currentHeight;
-        brianRoot.scale.set(scale, scale, scale);
+        orientationFix.scale.set(scale, scale, scale);
         console.log(`📏 Brian scaled: ${currentHeight.toFixed(2)} → ${desiredHeight}m (factor ${scale.toFixed(3)})`);
       } else {
         console.warn('⚠️ Brian height is nearly zero – using scale 1');
       }
 
-      // Shift so feet are at y=0 (min Y becomes 0)
-      brianRoot.updateMatrixWorld();
-      const boxAfterScale = new THREE.Box3().setFromObject(brianRoot);
+      // Shift feet to ground level (min Y = 0)
+      orientationFix.updateMatrixWorld();
+      const boxAfterScale = new THREE.Box3().setFromObject(orientationFix);
       const feetY = boxAfterScale.min.y;
       console.log('🦶 Feet Y before shift:', feetY);
-      brianRoot.position.y = -feetY;
+      orientationFix.position.y = -feetY;   // move within orientationFix, not brianRoot
 
-      console.log('✅ Brian ready (feet on ground, Y-up, height 1.8m)');
+      console.log('✅ Brian ready (feet on ground, height 1.8m)');
       return brianRoot;
     } catch (err) {
       console.error('❌ Brian load failed:', err.message, err);
@@ -162,11 +170,15 @@ async function init3D() {
           if (brianTemplate) {
             actorGroup = brianTemplate.clone(true);
             actorGroup.userData = { isBrian: true, actorId: it.id };
+
+            // Attach an AxisHelper so you can see orientation (red=X, green=Y, blue=Z)
+            const axes = new THREE.AxesHelper(1.0);
+            actorGroup.add(axes);
+
             scene.add(actorGroup);
             actorMeshes.set(it.id, actorGroup);
             console.log(`➕ Added Brian for actor ${it.id}`);
           } else {
-            // Fallback purple box
             console.warn(`⚠️ No Brian model – fallback box for actor ${it.id}`);
             const geo = new THREE.BoxGeometry(0.6, 1.8, 0.4);
             const mat = new THREE.MeshStandardMaterial({ color: 0x8888ff });
@@ -179,10 +191,10 @@ async function init3D() {
           }
         }
 
-        // Position at world coordinates (feet already at ground)
+        // Position at world coordinates (feet already at ground in orientationFix)
         actorGroup.position.copy(worldToThree(it.x, it.y, 0));
 
-        // Facing rotation
+        // Facing rotation – only rotate the root around world Y
         const facingRad = it.facing * state.D2R;
         actorGroup.rotation.y = -facingRad + Math.PI / 2;
 
