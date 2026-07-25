@@ -143,6 +143,9 @@ async function init3D() {
         staticGroup.scale.set(1, 1, 1);
       }
 
+      // After scaling, rotate to make Brian stand upright (Z‑up to Y‑up)
+      staticGroup.rotation.x = -Math.PI / 2;
+
       console.log('✅ Static Brian ready (baked pose, no skeleton)');
       return staticGroup;
     } catch (err) {
@@ -197,7 +200,7 @@ async function init3D() {
         }
 
         // Apply world position
-        const pos = worldToThree(it.x, it.y, 0);
+        const pos = worldToThree(it.x, it.y, 0.9);
         g.position.copy(pos);
 
         // Apply facing rotation
