@@ -1,4 +1,4 @@
-// ===== Progressive-enhancement 3D viewfinder =====
+// ===== DIAGNOSTIC VERSION - Bright red Brian, large axis helper, verbose logging =====
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
@@ -39,7 +39,7 @@ async function init3D() {
   const camera = new THREE.PerspectiveCamera(50, 16 / 9, 0.1, 200);
 
   // Lighting
-  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+  scene.add(new THREE.AmbientLight(0xffffff, 0.8));
   
   const mainLight = new THREE.DirectionalLight(0xffeedd, 1.5);
   mainLight.position.set(10, 15, 10);
@@ -51,14 +51,6 @@ async function init3D() {
   mainLight.shadow.camera.bottom = -20;
   scene.add(mainLight);
 
-  const fillLight = new THREE.DirectionalLight(0x8888ff, 0.3);
-  fillLight.position.set(-10, 5, -10);
-  scene.add(fillLight);
-
-  const rimLight = new THREE.DirectionalLight(0xffffff, 0.2);
-  rimLight.position.set(0, 10, -20);
-  scene.add(rimLight);
-
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(80, 80),
     new THREE.MeshStandardMaterial({ color: 0xe8e4df, roughness: 0.8 })
@@ -67,23 +59,7 @@ async function init3D() {
   ground.receiveShadow = true;
   scene.add(ground);
 
-  // Vignette panels
-  Object.entries(state.V).forEach(([name, ang]) => {
-    const rad = ang * state.D2R;
-    const center = state.pt(ang, state.R_VIGNETTE);
-    const geo = new THREE.PlaneGeometry(state.VIGNETTE_WIDTH_M, state.VIGNETTE_HEIGHT_M);
-    const mat = new THREE.MeshStandardMaterial({ 
-      color: 0xcdc4e8, side: THREE.DoubleSide, roughness: 0.6, metalness: 0.1
-    });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.copy(worldToThree(center.x, center.y, state.VIGNETTE_HEIGHT_M / 2));
-    const outward = worldToThree(center.x + Math.cos(rad) * 5, center.y + Math.sin(rad) * 5, state.VIGNETTE_HEIGHT_M / 2);
-    mesh.lookAt(outward);
-    mesh.receiveShadow = true;
-    scene.add(mesh);
-  });
-
-  // --- Load Brian, auto-orient with verbose logging and axis helpers ---
+  // --- Load Brian and make him bright red with huge axis arrows ---
   async function loadBrianModel() {
     const loader = new GLTFLoader();
     const url = './Brian_Final.glb';
@@ -101,25 +77,21 @@ async function init3D() {
       const rawSize = new THREE.Vector3();
       rawBox.getSize(rawSize);
       console.log('📦 Raw bounding box size (X, Y, Z):', rawSize.x, rawSize.y, rawSize.z);
-      console.log('   Raw min:', rawBox.min, 'max:', rawBox.max);
+      console.log('   Raw min:', rawBox.min.toArray(), 'max:', rawBox.max.toArray());
 
+      // Determine height axis and rotate to stand
       const { x: dx, y: dy, z: dz } = rawSize;
-      let heightAxis = 'y';
       let standRotation = null;
-
       if (dz >= dy && dz >= dx) {
-        heightAxis = 'z';
-        standRotation = new THREE.Euler(-Math.PI / 2, 0, 0); // rotate Z to Y
+        standRotation = new THREE.Euler(-Math.PI / 2, 0, 0);
         console.log('🔄 Height axis is Z, rotating -90° around X');
       } else if (dx >= dy && dx >= dz) {
-        heightAxis = 'x';
         standRotation = new THREE.Euler(0, 0, -Math.PI / 2);
         console.log('🔄 Height axis is X, rotating -90° around Z');
       } else {
-        console.log('🔄 Height axis already Y, no rotation needed');
+        console.log('🔄 Height axis is Y, no rotation needed');
       }
 
-      // Apply stand rotation
       if (standRotation) {
         const rotator = new THREE.Group();
         rotator.rotation.copy(standRotation);
@@ -130,21 +102,15 @@ async function init3D() {
         modelRoot.updateMatrixWorld();
       }
 
-      // Upright bounding box
+      // Check upside-down and flip if needed
       const uprightBox = new THREE.Box3().setFromObject(modelRoot);
-      console.log('📦 Upright box min/max Y:', uprightBox.min.y, uprightBox.max.y);
-
-      // Check for upside-down using original feet point
       const originalFeet = new THREE.Vector3(0, 0, rawBox.min.z);
       if (standRotation) {
         const m = new THREE.Matrix4().makeRotationFromEuler(standRotation);
         originalFeet.applyMatrix4(m);
       }
-      const predictedFeetY = originalFeet.y;
-      console.log('🔍 Predicted feet Y after rotation:', predictedFeetY);
-
-      if (predictedFeetY > uprightBox.max.y - 0.1) {
-        console.log('🙃 Model is upside‑down, flipping 180° around X');
+      if (originalFeet.y > uprightBox.max.y - 0.1) {
+        console.log('🙃 Model upside‑down, flipping 180° around X');
         const flipper = new THREE.Group();
         flipper.rotation.x = Math.PI;
         while (modelRoot.children.length) {
@@ -158,7 +124,7 @@ async function init3D() {
       const finalBox = new THREE.Box3().setFromObject(modelRoot);
       const finalSize = new THREE.Vector3();
       finalBox.getSize(finalSize);
-      console.log('📦 Final box min/max Y:', finalBox.min.y, finalBox.max.y, 'height:', finalSize.y);
+      console.log('📦 Final box min Y:', finalBox.min.y, 'max Y:', finalBox.max.y, 'height:', finalSize.y);
 
       // Scale to 1.8m
       const currentHeight = finalSize.y;
@@ -167,36 +133,30 @@ async function init3D() {
         const scale = desiredHeight / currentHeight;
         modelRoot.scale.set(scale, scale, scale);
         console.log(`📏 Brian scaled: ${currentHeight.toFixed(2)} → ${desiredHeight}m`);
-      } else {
-        console.warn('⚠️ Brian height is zero – using scale 1');
       }
 
       // Shift feet to ground
       modelRoot.updateMatrixWorld();
       const groundBox = new THREE.Box3().setFromObject(modelRoot);
       const feetY = groundBox.min.y;
-      console.log('🦶 Feet Y before ground shift:', feetY);
+      console.log('🦶 Feet Y before shift:', feetY);
       modelRoot.position.y = -feetY;
 
-      // Apply alabaster material
+      // *** BRIGHT RED MATERIAL for visibility ***
       modelRoot.traverse((child) => {
         if (child.isMesh) {
           child.material = new THREE.MeshStandardMaterial({
-            color: 0xf5f0eb,
-            roughness: 0.9,
+            color: 0xff0000,
+            roughness: 0.5,
             metalness: 0.0,
-            emissive: new THREE.Color(0x000000),
+            emissive: new THREE.Color(0x330000),
           });
           child.castShadow = true;
           child.receiveShadow = true;
         }
       });
 
-      // Add axis helper to the template itself (will appear on each clone)
-      const axes = new THREE.AxesHelper(1.5);
-      modelRoot.add(axes);
-
-      console.log('✅ Brian ready (axes added: red=X, green=Y, blue=Z)');
+      console.log('✅ Brian ready (BRIGHT RED)');
       return modelRoot;
     } catch (err) {
       console.error('❌ Brian load failed:', err.message, err);
@@ -226,7 +186,10 @@ async function init3D() {
             actorGroup.userData = { isBrian: true, actorId: it.id };
             scene.add(actorGroup);
             actorMeshes.set(it.id, actorGroup);
-            console.log(`➕ Added Brian for actor ${it.id}`);
+            // *** Add huge axis helper (5m) to the actor group ***
+            const bigAxes = new THREE.AxesHelper(5);
+            actorGroup.add(bigAxes);
+            console.log(`➕ Added Brian for actor ${it.id} with BIG AXES (5m)`);
           } else {
             console.warn(`⚠️ No Brian model – fallback box for actor ${it.id}`);
             const geo = new THREE.BoxGeometry(0.6, 1.8, 0.4);
@@ -240,16 +203,18 @@ async function init3D() {
           }
         }
 
-        // Position at world location (feet already at ground)
-        actorGroup.position.copy(worldToThree(it.x, it.y, 0));
+        // Position at world coordinates
+        const worldPos = worldToThree(it.x, it.y, 0);
+        console.log(`📍 Actor ${it.id} position:`, worldPos.toArray());
+        actorGroup.position.copy(worldPos);
 
-        // Facing rotation (spins around world Y)
-        const facingRad = it.facing * state.D2R;
-        actorGroup.rotation.y = -facingRad + Math.PI / 2;
+        // TEMPORARILY DISABLE FACING ROTATION for clean view
+        // const facingRad = it.facing * state.D2R;
+        // actorGroup.rotation.y = -facingRad + Math.PI / 2;
 
         actorGroup.updateMatrixWorld(true);
+        console.log(`🔵 Actor ${it.id} world matrix:`, actorGroup.matrixWorld.elements);
       } else {
-        // Props (cuboid)
         let m = propMeshes.get(it.id);
         if (!m) {
           const geo = new THREE.BoxGeometry(it.w, it.h, it.w * 0.7);
