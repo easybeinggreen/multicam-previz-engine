@@ -1,6 +1,5 @@
 // ===== Progressive-enhancement 3D viewfinder =====
-// Uses importmap to load three.js and GLTFLoader
-
+// Assumes a Y-up .glb (exported from Blender with "+Y Up" option)
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
@@ -28,10 +27,10 @@ async function init3D() {
 
   canvas3d.addEventListener('webglcontextlost', (e) => {
     e.preventDefault();
-    console.error('❌ WebGL context was lost — this is why the screen froze.');
+    console.error('❌ WebGL context was lost.');
   });
   canvas3d.addEventListener('webglcontextrestored', () => {
-    console.warn('✅ WebGL context restored, resuming render.');
+    console.warn('✅ WebGL context restored.');
   });
 
   const state = window.PrevizState;
@@ -41,8 +40,7 @@ async function init3D() {
   const camera = new THREE.PerspectiveCamera(50, 16 / 9, 0.1, 200);
 
   // Lighting
-  const ambient = new THREE.AmbientLight(0xffffff, 0.5);
-  scene.add(ambient);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
   
   const mainLight = new THREE.DirectionalLight(0xffeedd, 1.5);
   mainLight.position.set(10, 15, 10);
@@ -54,13 +52,8 @@ async function init3D() {
   mainLight.shadow.camera.bottom = -20;
   scene.add(mainLight);
 
-  const fillLight = new THREE.DirectionalLight(0x8888ff, 0.3);
-  fillLight.position.set(-10, 5, -10);
-  scene.add(fillLight);
-
-  const rimLight = new THREE.DirectionalLight(0xffffff, 0.2);
-  rimLight.position.set(0, 10, -20);
-  scene.add(rimLight);
+  scene.add(new THREE.DirectionalLight(0x8888ff, 0.3).translateX(-10).translateY(5).translateZ(-10));
+  scene.add(new THREE.DirectionalLight(0xffffff, 0.2).translateZ(-20).translateY(10));
 
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(80, 80),
@@ -70,16 +63,13 @@ async function init3D() {
   ground.receiveShadow = true;
   scene.add(ground);
 
-  // Vignette panels
+  // Vignette panels (unchanged)
   Object.entries(state.V).forEach(([name, ang]) => {
     const rad = ang * state.D2R;
     const center = state.pt(ang, state.R_VIGNETTE);
     const geo = new THREE.PlaneGeometry(state.VIGNETTE_WIDTH_M, state.VIGNETTE_HEIGHT_M);
     const mat = new THREE.MeshStandardMaterial({ 
-      color: 0xcdc4e8,
-      side: THREE.DoubleSide,
-      roughness: 0.6,
-      metalness: 0.1
+      color: 0xcdc4e8, side: THREE.DoubleSide, roughness: 0.6, metalness: 0.1
     });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.copy(worldToThree(center.x, center.y, state.VIGNETTE_HEIGHT_M / 2));
@@ -89,23 +79,22 @@ async function init3D() {
     scene.add(mesh);
   });
 
-  // --- Load Brian and prepare a template that stands upright with feet on ground ---
+  // --- Load Brian (Y-up model) ---
   async function loadBrianModel() {
     const loader = new GLTFLoader();
-    const url = './Brian_Baked.glb';
+    const url = './Brian_YUp.glb';   // <-- your re-exported file
     console.log('🔄 Loading Brian from:', url);
     try {
-      const gltf = await new Promise((resolve, reject) => {
-        loader.load(url, resolve, undefined, reject);
-      });
+      const gltf = await loader.loadAsync(url);
       console.log('✅ GLTF loaded');
 
-      // 1. Wrap the whole scene to apply materials and scaling
-      const modelGroup = new THREE.Group();
-      modelGroup.add(gltf.scene);
+      // Root group to hold the whole actor
+      const brianRoot = new THREE.Group();
+      brianRoot.name = 'BrianRoot';
+      brianRoot.add(gltf.scene);
 
-      // Alabaster material override
-      modelGroup.traverse((child) => {
+      // Apply alabaster material to all meshes
+      brianRoot.traverse((child) => {
         if (child.isMesh) {
           child.material = new THREE.MeshStandardMaterial({
             color: 0xf5f0eb,
@@ -118,40 +107,28 @@ async function init3D() {
         }
       });
 
-      // 2. Measure original size (model is Z-up, so height = size.z)
-      const box = new THREE.Box3().setFromObject(modelGroup);
+      // Measure height along Y (model is already Y-up)
+      const box = new THREE.Box3().setFromObject(brianRoot);
       const size = new THREE.Vector3();
       box.getSize(size);
-      const currentHeight = size.z;
-      const desiredHeight = 1.8;   // metres
+      const currentHeight = size.y;   // height along Y
+      const desiredHeight = 1.8;      // metres
       if (currentHeight > 0) {
         const scale = desiredHeight / currentHeight;
-        modelGroup.scale.set(scale, scale, scale);
-        console.log(`📏 Brian scaled: ${currentHeight.toFixed(2)} → ${desiredHeight}m (factor ${scale.toFixed(3)})`);
+        brianRoot.scale.set(scale, scale, scale);
+        console.log(`📏 Brian scaled: ${currentHeight.toFixed(2)} → ${desiredHeight}m`);
       } else {
         console.warn('⚠️ Brian height is zero – using scale 1');
-        modelGroup.scale.set(1, 1, 1);
       }
 
-      // 3. Shift model so feet are at local origin (min Z = 0 after scaling)
-      modelGroup.updateMatrixWorld(); // make sure bounding box is updated
-      const boxAfterScale = new THREE.Box3().setFromObject(modelGroup);
-      const bottomZ = boxAfterScale.min.z; // feet in Z-up orientation
-      modelGroup.position.z = -bottomZ;    // bring feet to Z=0
+      // Shift so feet are at Y=0 (min Y => 0)
+      brianRoot.updateMatrixWorld();
+      const boxAfterScale = new THREE.Box3().setFromObject(brianRoot);
+      const feetY = boxAfterScale.min.y;
+      brianRoot.position.y = -feetY;   // lift to ground
 
-      // 4. Create upright group: rotates model from Z-up to Y-up (standing)
-      const uprightGroup = new THREE.Group();
-      uprightGroup.name = 'Upright';
-      uprightGroup.rotation.x = Math.PI / 2;  // correct rotation
-      uprightGroup.add(modelGroup);
-
-      // 5. Root template group – will be cloned per actor
-      const template = new THREE.Group();
-      template.name = 'BrianTemplate';
-      template.add(uprightGroup);
-
-      console.log('✅ Brian template ready (feet on ground, upright, no skeleton)');
-      return template;
+      console.log('✅ Brian ready (feet on ground, Y-up)');
+      return brianRoot;
     } catch (err) {
       console.error('❌ Brian load failed:', err);
       return null;
@@ -167,19 +144,8 @@ async function init3D() {
   function syncItems() {
     const liveIds = new Set(state.items.map(i => i.id));
     
-    // Cleanup removed actors and props
-    actorMeshes.forEach((mesh, id) => {
-      if (!liveIds.has(id)) {
-        scene.remove(mesh);
-        actorMeshes.delete(id);
-      }
-    });
-    propMeshes.forEach((mesh, id) => {
-      if (!liveIds.has(id)) {
-        scene.remove(mesh);
-        propMeshes.delete(id);
-      }
-    });
+    actorMeshes.forEach((mesh, id) => { if (!liveIds.has(id)) { scene.remove(mesh); actorMeshes.delete(id); } });
+    propMeshes.forEach((mesh, id) => { if (!liveIds.has(id)) { scene.remove(mesh); propMeshes.delete(id); } });
 
     state.items.forEach(it => {
       if (it.type === 'actor') {
@@ -191,12 +157,11 @@ async function init3D() {
             scene.add(actorGroup);
             actorMeshes.set(it.id, actorGroup);
           } else {
-            console.warn(`⚠️ No Brian model – fallback box for actor ${it.id}`);
+            // Fallback box
             const geo = new THREE.BoxGeometry(0.6, 1.8, 0.4);
             const mat = new THREE.MeshStandardMaterial({ color: 0x8888ff });
             const box = new THREE.Mesh(geo, mat);
-            box.castShadow = true;
-            box.receiveShadow = true;
+            box.castShadow = true; box.receiveShadow = true;
             box.userData = { isBrian: false, actorId: it.id };
             scene.add(box);
             actorMeshes.set(it.id, box);
@@ -204,28 +169,26 @@ async function init3D() {
           }
         }
 
-        // Position at actor's world coordinates (feet on ground)
-        const pos = worldToThree(it.x, it.y, 0);
-        actorGroup.position.copy(pos);
+        // Position at world coordinates (feet already at ground level inside the group)
+        actorGroup.position.copy(worldToThree(it.x, it.y, 0));
 
-        // Facing direction – rotate around world Y axis
+        // Facing – rotate only the root group around world Y
         const facingRad = it.facing * state.D2R;
         actorGroup.rotation.y = -facingRad + Math.PI / 2;
 
         actorGroup.updateMatrixWorld(true);
       } else {
         // Props (cuboid)
-        let propMesh = propMeshes.get(it.id);
-        if (!propMesh) {
+        let m = propMeshes.get(it.id);
+        if (!m) {
           const geo = new THREE.BoxGeometry(it.w, it.h, it.w * 0.7);
           const mat = new THREE.MeshStandardMaterial({ color: it.color, roughness: 0.7 });
-          propMesh = new THREE.Mesh(geo, mat);
-          propMesh.castShadow = true;
-          propMesh.receiveShadow = true;
-          scene.add(propMesh);
-          propMeshes.set(it.id, propMesh);
+          m = new THREE.Mesh(geo, mat);
+          m.castShadow = true; m.receiveShadow = true;
+          scene.add(m);
+          propMeshes.set(it.id, m);
         }
-        propMesh.position.copy(worldToThree(it.x, it.y, it.h / 2));
+        m.position.copy(worldToThree(it.x, it.y, it.h / 2));
       }
     });
   }
@@ -240,7 +203,6 @@ async function init3D() {
   }
   window.addEventListener('resize', resize);
 
-  // Main render loop with error safety
   window.Previz3DRender = function () {
     try {
       resize();
@@ -251,12 +213,9 @@ async function init3D() {
       camera.position.copy(worldToThree(cam.x, cam.y, cam.z));
       camera.lookAt(worldToThree(cam.aimX, cam.aimY, cam.aimZ));
       syncItems();
-      
-      if (renderer.getContext().isContextLost()) {
-        console.warn('WebGL context lost, skipping render');
-        return;
+      if (!renderer.getContext().isContextLost()) {
+        renderer.render(scene, camera);
       }
-      renderer.render(scene, camera);
     } catch (err) {
       console.error('Render error:', err);
     }
@@ -264,33 +223,26 @@ async function init3D() {
 
   let use3dActive = true;
   function frameLoop() {
-    if (use3dActive && window.Previz3DRender) {
-      window.Previz3DRender();
-    }
-    requestAnimationFrame(frameLoop);
+    if (use3dActive && window.Previz3DRender) requestAnimationFrame(() => { window.Previz3DRender(); frameLoop(); });
+    else requestAnimationFrame(frameLoop);
   }
 
   const toggleChangeHandler = () => {
     use3dActive = toggle.checked;
     canvas2d.style.display = use3dActive ? 'none' : 'block';
     canvas3d.style.display = use3dActive ? 'block' : 'none';
-    if (use3dActive && window.Previz3DRender) {
-      window.Previz3DRender();
-    }
+    if (use3dActive) window.Previz3DRender();
   };
-
   toggle.onchange = toggleChangeHandler;
   toggle.disabled = false;
   toggle.checked = true;
   canvas2d.style.display = 'none';
   canvas3d.style.display = 'block';
 
-  // Initial sync
   syncItems();
   requestAnimationFrame(frameLoop);
 }
 
-// Wait for main app
 if (window.PrevizState) {
   init3D();
 } else {
