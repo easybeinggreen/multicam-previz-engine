@@ -21,7 +21,18 @@ body {
 
 .app { max-width: 1700px; margin: 0 auto; padding: 16px 24px; }
 
-.app-header h1 { font-size: 22px; margin: 0 0 4px; }
+.app-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.app-header h1 {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+  margin: 0 0 4px;
+}
 .subtitle { margin: 0 0 16px; color: var(--text-muted); font-size: 14px; }
 
 .controls-bar {
@@ -57,6 +68,12 @@ body {
   gap: 10px 16px;
   align-items: end;
 }
+
+.controls-grid.two-col {
+  grid-template-columns: 1fr 1fr;
+}
+
+.span-2 { grid-column: 1 / -1; }
 
 .control-group {
   display: flex;
@@ -125,6 +142,10 @@ button:hover { border-color: var(--accent-dim); background: #f0f9f6; }
 .button-group button {
   flex: 1;
 }
+.button-group select {
+  flex: 1;
+  width: auto;
+}
 
 .dim-row {
   display: flex;
@@ -141,10 +162,6 @@ button:hover { border-color: var(--accent-dim); background: #f0f9f6; }
   width: 100%;
   padding: 4px 5px;
   font-size: 12px;
-}
-
-.distance-group {
-  grid-column: 1 / -1;
 }
 
 .distance-readout {
