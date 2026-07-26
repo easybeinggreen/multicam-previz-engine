@@ -23,14 +23,14 @@ function pt(angleDeg, radius) {
 }
 const ROOM_CENTER = { x: 0, y: -R_VIGNETTE };
 
-// Vignette centre angles (unchanged)
+// Vignette centre angles
 const V = { V1: 155, V2: 122, V3: 90, V4: 57, V5: 24 };
 
 // Stage marks — 2m in front of the wall
 const STAGE_MARKS = {};
 Object.keys(V).forEach(k => { STAGE_MARKS[k] = pt(V[k], R_VIGNETTE - 2); });
 
-// Targets (unchanged)
+// Targets
 const TARGETS = {
   "Room centre": () => ({ x: ROOM_CENTER.x, y: ROOM_CENTER.y }),
   "Origin (V3 base)": () => ({ x: 0, y: 0 }),
@@ -43,7 +43,7 @@ const TARGETS = {
   "Vignette4-5": () => pt((V.V4 + V.V5) / 2, R_VIGNETTE)
 };
 
-// Camera table (unchanged but ensure all coordinates are valid)
+// Camera table
 const CAMS = {
   "CAM1 Flung Rail": { type: "track", path: [pt(251, 14.6), pt(281, 14.6)], z: 1.0, lens: 35, aim: "Room centre", aimX: ROOM_CENTER.x, aimY: ROOM_CENTER.y, aimZ: 1.6 },
   "CAM2 Long V1": { type: "fixed", x: pt(332, 17.7).x, y: pt(332, 17.7).y, z: 1.2, lens: 200, aim: "Vignette1", aimX: pt(V.V1, R_VIGNETTE).x, aimY: pt(V.V1, R_VIGNETTE).y, aimZ: 1.6 },
@@ -56,7 +56,7 @@ const CAMS = {
   "CAM9 Long V5": { type: "fixed", x: pt(207, 18.2).x, y: pt(207, 18.2).y, z: 1.2, lens: 200, aim: "Vignette5", aimX: pt(V.V5, R_VIGNETTE).x, aimY: pt(V.V5, R_VIGNETTE).y, aimZ: 1.6 },
   "CAM10 Mag Track": { type: "track", path: [pt(48, 7.3), pt(58, 7.3)], z: 1.6, lens: 24, aim: "Room centre", aimX: ROOM_CENTER.x, aimY: ROOM_CENTER.y, aimZ: 1.6 },
   "CAM11 Steadicam": { type: "track", path: [pt(155, 14.2), pt(185, 14.2)], z: 1.6, lens: 24, aim: "Room centre", aimX: ROOM_CENTER.x, aimY: ROOM_CENTER.y, aimZ: 1.6 },
-  "CAM12 Ladder": { type: "fixed", x: 0, y: -R_VIGNETTE, z: 4.5, lens: 35, aim: "Room centre", aimX: ROOM_CENTER.x, aimY: ROOM_CENTER.y, aimZ: 1.6 }
+  "CAM12 Ladder": { type: "fixed", x: 0, y: -R_VIGNETTE, z: 4.5, lens: 35, aim: "Origin (V3 base)", aimX: 0, aimY: 0, aimZ: 1.6 }
 };
 Object.keys(CAMS).forEach(k => {
   const c = CAMS[k];
@@ -67,15 +67,12 @@ Object.keys(CAMS).forEach(k => {
   }
 });
 
-// Seating — curved blocks
+// Seating – three blocks
 const SEAT_ROWS = 25;
-const SEAT_RADIUS_MIN = 3.0;
-const SEAT_RADIUS_MAX = R_AUDIENCE;
-const SEAT_BLOCKS = [
-  { angleFrom: 155, angleTo: 220, seatsPerRow: 8 },
-  { angleFrom: 220, angleTo: 320, seatsPerRow: 14 },
-  { angleFrom: 320, angleTo: 385, seatsPerRow: 8 }
-];
+const SEAT_FRONT_Y = -R_AUDIENCE;
+const SEAT_BACK_Y = -R_VIGNETTE - 5; // 5m behind room centre
+const LEFT_WALKWAY_X = -3.5;
+const RIGHT_WALKWAY_X = 3.5;
 
 // Character presets
 const CHARACTERS = {
@@ -83,7 +80,7 @@ const CHARACTERS = {
   female: { label: "Female actor", height: 1.7, color: "#B565D8", modelKey: "brian" }
 };
 
-// Initial items: male and female actors, plus a table
+// Initial items
 let items = [
   { id: 1, type: "actor", label: "Male actor", x: STAGE_MARKS.V3.x, y: STAGE_MARKS.V3.y, z: 0, w: 0.7, d: 0.4, h: 1.8, facing: 270, color: "#378ADD", standAt: "V3", character: "male", modelKey: "brian" },
   { id: 2, type: "actor", label: "Female actor", x: STAGE_MARKS.V2.x, y: STAGE_MARKS.V2.y, z: 0, w: 0.65, d: 0.4, h: 1.7, facing: 302, color: "#B565D8", standAt: "V2", character: "female", modelKey: "brian" },
@@ -110,7 +107,7 @@ const azSlider = document.getElementById('azs');
 azSlider.oninput = e => { CAMS[active].aimZ = +e.target.value; document.getElementById('az').innerText = toFeetInches(+e.target.value); render(); };
 
 const chzSlider = document.getElementById('chzs');
-chzSlider.max = 12; // increased from 6
+chzSlider.max = 12;
 chzSlider.oninput = e => { CAMS[active].z = +e.target.value; document.getElementById('chz').innerText = toFeetInches(+e.target.value); render(); };
 
 const tpSlider = document.getElementById('tps');
@@ -300,50 +297,63 @@ function drawFP() {
   const fromPx = (px, py) => ({ x: (px - cx) / scale + ROOM_CENTER.x, y: ROOM_CENTER.y - (py - cy) / scale });
   window._fpT = { toPx, fromPx };
 
-  // ---- Draw seating (curved arcs) ----
-  const rowStep = (SEAT_RADIUS_MAX - SEAT_RADIUS_MIN) / SEAT_ROWS;
-  ctx.fillStyle = "#c9c9cf";
-  ctx.strokeStyle = "#999";
+  // ---- Draw seating (three blocks) ----
+  const rowStep = (SEAT_BACK_Y - SEAT_FRONT_Y) / SEAT_ROWS;
+  const seatColor = "#c9c9cf";
+  const seatStroke = "#999";
+  ctx.fillStyle = seatColor;
+  ctx.strokeStyle = seatStroke;
   ctx.lineWidth = 0.5;
 
-  SEAT_BLOCKS.forEach(block => {
-    const angleFrom = block.angleFrom * D2R;
-    const angleTo = block.angleTo * D2R;
-    const seats = block.seatsPerRow;
-    for (let r = 0; r < SEAT_ROWS; r++) {
-      const radius = SEAT_RADIUS_MIN + r * rowStep;
-      const arcLength = radius * (angleTo - angleFrom);
-      const seatWidth = arcLength / seats;
-      for (let s = 0; s < seats; s++) {
-        const angle = angleFrom + (s + 0.5) * (angleTo - angleFrom) / seats;
-        const x = radius * Math.cos(angle);
-        const y = radius * Math.sin(angle) - R_VIGNETTE; // shift because pt() shifts y
-        const p = toPx(x, y);
-        const rad = angle;
-        const halfW = seatWidth * 0.4;
-        const halfD = rowStep * 0.3;
-        const dx = Math.cos(rad);
-        const dy = Math.sin(rad);
-        const perpX = -dy;
-        const perpY = dx;
-        const corners = [
-          { x: x + dx * halfD + perpX * halfW, y: y + dy * halfD + perpY * halfW },
-          { x: x + dx * halfD - perpX * halfW, y: y + dy * halfD - perpY * halfW },
-          { x: x - dx * halfD - perpX * halfW, y: y - dy * halfD - perpY * halfW },
-          { x: x - dx * halfD + perpX * halfW, y: y - dy * halfD + perpY * halfW }
-        ];
-        const px = corners.map(c => toPx(c.x, c.y));
-        ctx.beginPath();
-        ctx.moveTo(px[0].x, px[0].y);
-        for (let i = 1; i < 4; i++) ctx.lineTo(px[i].x, px[i].y);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-      }
-    }
-  });
+  // Helper: circle x at a given y (shifted coords)
+  const circleX = (y) => {
+    const dy = y + R_VIGNETTE;
+    const r2 = R_AUDIENCE * R_AUDIENCE - dy * dy;
+    if (r2 < 0) return null;
+    return Math.sqrt(r2);
+  };
 
-  // ---- Draw stage floor (ring from R_AUDIENCE to R_VIGNETTE) ----
+  // Draw a row of seats
+  function drawRow(y, xStart, xEnd, seats) {
+    const width = xEnd - xStart;
+    const seatW = width / seats;
+    for (let s = 0; s < seats; s++) {
+      const x = xStart + s * seatW + seatW * 0.08;
+      const p = toPx(x, y);
+      const p2 = toPx(x + seatW * 0.8, y - rowStep * 0.55);
+      const ww = Math.abs(p2.x - p.x);
+      const hh = Math.abs(p2.y - p.y);
+      if (ww < 1 || hh < 1) continue;
+      ctx.fillRect(Math.min(p.x, p2.x), Math.min(p.y, p2.y), ww, hh);
+      ctx.strokeRect(Math.min(p.x, p2.x), Math.min(p.y, p2.y), ww, hh);
+    }
+  }
+
+  for (let r = 0; r < SEAT_ROWS; r++) {
+    const y = SEAT_FRONT_Y + r * rowStep;
+    // Central block
+    const centralWidth = RIGHT_WALKWAY_X - LEFT_WALKWAY_X;
+    const centralSeats = Math.floor(centralWidth / 0.4);
+    if (centralSeats > 0) drawRow(y, LEFT_WALKWAY_X, RIGHT_WALKWAY_X, centralSeats);
+
+    // Left block
+    const leftX = circleX(y);
+    if (leftX !== null && leftX > LEFT_WALKWAY_X) {
+      const leftWidth = leftX - LEFT_WALKWAY_X;
+      const leftSeats = Math.floor(leftWidth / 0.4);
+      if (leftSeats > 0) drawRow(y, LEFT_WALKWAY_X, leftX, leftSeats);
+    }
+
+    // Right block
+    const rightX = -circleX(y);
+    if (rightX !== null && rightX < RIGHT_WALKWAY_X) {
+      const rightWidth = RIGHT_WALKWAY_X - rightX;
+      const rightSeats = Math.floor(rightWidth / 0.4);
+      if (rightSeats > 0) drawRow(y, rightX, RIGHT_WALKWAY_X, rightSeats);
+    }
+  }
+
+  // ---- Draw stage floor (ring) ----
   ctx.fillStyle = "#e8e4df";
   ctx.strokeStyle = "#d0ccc6";
   ctx.lineWidth = 1;
@@ -363,14 +373,14 @@ function drawFP() {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // ---- Blue margin (thick blue line at R_AUDIENCE) ----
+  // ---- Blue margin ----
   ctx.strokeStyle = "#2196F3";
   ctx.lineWidth = 3;
   ctx.beginPath();
   ctx.arc(cx, cy, R_AUDIENCE * scale, 0, 7);
   ctx.stroke();
 
-  // ---- Vignette panels (updated radius) ----
+  // ---- Vignette panels ----
   Object.entries(V).forEach(([name, ang]) => {
     const pts = [];
     for (let d = -VIGNETTE_HALF_WIDTH_DEG; d <= VIGNETTE_HALF_WIDTH_DEG; d += 2) pts.push(toPx(...Object.values(pt(ang + d, R_VIGNETTE))));
@@ -381,17 +391,10 @@ function drawFP() {
   });
   ctx.lineWidth = 1;
 
-  // ---- Origin marker (red dot only, no text) ----
+  // ---- Origin marker (red dot) ----
   const originPx = toPx(0, 0);
   ctx.fillStyle = "#D8433B";
   ctx.beginPath(); ctx.arc(originPx.x, originPx.y, 5, 0, 7); ctx.fill();
-
-  // ---- Audience floor height label ----
-  ctx.fillStyle = "#666";
-  ctx.font = "9px monospace";
-  ctx.textAlign = "left";
-  const labelPos = toPx(0, -R_AUDIENCE + 2);
-  ctx.fillText("Audience floor: -1.14m (-3'9\")", labelPos.x - 60, labelPos.y);
 
   // ---- Cameras ----
   Object.keys(CAMS).forEach(k => {
@@ -409,9 +412,13 @@ function drawFP() {
       window._aimPx = aimPx;
       ctx.strokeStyle = "rgba(15,157,116,0.7)"; ctx.setLineDash([4, 3]);
       ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(aimPx.x, aimPx.y); ctx.stroke(); ctx.setLineDash([]);
-      ctx.strokeStyle = "#0F9D74"; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(aimPx.x - 7, aimPx.y); ctx.lineTo(aimPx.x + 7, aimPx.y);
-      ctx.moveTo(aimPx.x, aimPx.y - 7); ctx.lineTo(aimPx.x, aimPx.y + 7); ctx.stroke(); ctx.lineWidth = 1;
+      // Larger aim crosshair
+      ctx.strokeStyle = "#0F9D74"; ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(aimPx.x - 10, aimPx.y); ctx.lineTo(aimPx.x + 10, aimPx.y);
+      ctx.moveTo(aimPx.x, aimPx.y - 10); ctx.lineTo(aimPx.x, aimPx.y + 10);
+      ctx.stroke();
+      ctx.lineWidth = 1;
       const angles = fov(c.lens);
       const camAngle = Math.atan2(c.aimY - c.y, c.aimX - c.x);
       ctx.fillStyle = "rgba(15,157,116,0.10)";
@@ -601,19 +608,25 @@ function drawVF() {
   document.getElementById('hscale').innerText = "Closest actor: " + scaleLbl;
 }
 
-// ---------- Floor plan interaction: drag aim, drag items, pan, zoom, click camera ----------
+// ---------- Floor plan interaction ----------
 const fpCanvas = document.getElementById('fp');
 
 fpCanvas.addEventListener('mousedown', e => {
   const r = fpCanvas.getBoundingClientRect();
   const mx = e.clientX - r.left, my = e.clientY - r.top;
   if (!window._fpT) return;
-  // Check if click is on a camera marker (within 15px)
   const { toPx, fromPx } = window._fpT;
+
+  // 1. Check if click is on the aim marker (larger hit area)
+  if (window._aimPx && Math.hypot(mx - window._aimPx.x, my - window._aimPx.y) < 20) {
+    draggingAim = true;
+    return;
+  }
+
+  // 2. Check if click is on a camera
   for (const [k, c] of Object.entries(CAMS)) {
     const p = toPx(c.x, c.y);
     if (Math.hypot(mx - p.x, my - p.y) < 15) {
-      // Select this camera
       active = k;
       sel.value = k;
       syncControls();
@@ -621,13 +634,19 @@ fpCanvas.addEventListener('mousedown', e => {
       return;
     }
   }
-  // Otherwise, handle as before: aim drag, item drag, pan
-  if (window._aimPx && Math.hypot(mx - window._aimPx.x, my - window._aimPx.y) < 10) { draggingAim = true; return; }
+
+  // 3. Otherwise, try dragging items or panning
   const wc = fromPx(mx, my);
   for (const it of items) {
-    if (Math.hypot(it.x - wc.x, it.y - wc.y) < 0.8) { dragging = it; if (it.type === "actor") { activeActor = it.id; syncActorSel(); } return; }
+    if (Math.hypot(it.x - wc.x, it.y - wc.y) < 0.8) {
+      dragging = it;
+      if (it.type === "actor") { activeActor = it.id; syncActorSel(); }
+      render();
+      return;
+    }
   }
-  panning = true; panStart = { mx, my, panX: viewPanX, panY: viewPanY };
+  panning = true;
+  panStart = { mx, my, panX: viewPanX, panY: viewPanY };
 });
 
 fpCanvas.addEventListener('mousemove', e => {
