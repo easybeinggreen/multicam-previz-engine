@@ -192,6 +192,7 @@ button:hover { border-color: var(--accent-dim); background: #f0f9f6; }
   height: 55vh;
   min-height: 380px;
   max-height: 620px;
+  align-items: stretch;
 }
 
 .view-block {
@@ -208,6 +209,8 @@ button:hover { border-color: var(--accent-dim); background: #f0f9f6; }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: 1.5;
+  min-height: 1.5em;
 }
 
 canvas {
@@ -224,7 +227,7 @@ canvas {
 #fp:active { cursor: grabbing; }
 
 .use3d-row {
-  display: block;
+  display: inline-block;
   margin-bottom: 2px;
   font-size: 11px;
 }
@@ -244,19 +247,22 @@ canvas {
   position: absolute;
   bottom: 10px;
   left: 10px;
-  background: rgba(20,20,20,0.82);
+  background: rgba(20,20,20,0.85);
   border-left: 3px solid var(--accent);
-  padding: 6px 10px;
+  padding: 8px 12px;
   font-family: var(--mono);
   font-size: 12px;
   color: #fff;
-  border-radius: 3px;
+  border-radius: 4px;
+  pointer-events: none;
+  max-width: 90%;
 }
+.hud label { pointer-events: auto; cursor: pointer; }
 .hud-cam { font-weight: 600; }
 .hud-lens { color: #5DCAA5; }
 .hud-scale { color: #FAC775; }
+#hExtra { font-size: 10px; color: #bbb; margin-top: 4px; line-height: 1.4; }
 
-/* delete button next to actor dropdown */
 #deleteActor {
   padding: 5px 8px;
   line-height: 1;
