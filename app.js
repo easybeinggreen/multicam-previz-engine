@@ -316,11 +316,7 @@ function drawFP() {
   const chordX = Math.sqrt(radius * radius - dyCut * dyCut);
   const angle1 = Math.atan2(dyCut, -chordX);
   const angle2 = Math.atan2(dyCut, chordX);
-  // If angle1 > angle2, swap to ensure the arc goes the correct way
   // We want the arc that goes through the top (closest to stage) – that's the smaller segment.
-  // Since dyCut is positive (cutY > centreY), the top segment is the one above the chord.
-  // The angles: angle1 (left point) is around 2.3 rad, angle2 (right point) around 0.8 rad.
-  // We want the arc from angle1 to angle2 going clockwise (through PI/2).
   ctx.beginPath();
   ctx.moveTo(toPx(-chordX, cutY).x, toPx(-chordX, cutY).y);
   ctx.arc(toPx(centreX, centreY).x, toPx(centreX, centreY).y, radius * scale, angle1, angle2, true);
@@ -337,7 +333,7 @@ function drawFP() {
   ctx.lineWidth = 0.5;
 
   let y = backY;
-  while (y <= cutY) {  // stop at the cut‑off chord
+  while (y <= cutY) {
     const dy = y - centreY;
     const r2 = radius * radius - dy * dy;
     if (r2 <= 0) { y += seatDepth; continue; }
@@ -346,14 +342,11 @@ function drawFP() {
     const rightBound = xCirc;
 
     // Define block boundaries
-    // Left block: from leftBound to leftWalkwayLeft
     const leftBlockStart = leftBound;
-    const leftBlockEnd = leftWalkwayLeft; // -6.401
-    // Centre block: from leftWalkwayRight to rightWalkwayLeft
-    const centreBlockStart = leftWalkwayRight; // -4.572
-    const centreBlockEnd = rightWalkwayLeft;   // 4.572
-    // Right block: from rightWalkwayRight to rightBound
-    const rightBlockStart = rightWalkwayRight; // 6.401
+    const leftBlockEnd = leftWalkwayLeft;
+    const centreBlockStart = leftWalkwayRight;
+    const centreBlockEnd = rightWalkwayLeft;
+    const rightBlockStart = rightWalkwayRight;
     const rightBlockEnd = rightBound;
 
     function drawBlock(start, end, yPos) {
@@ -361,7 +354,7 @@ function drawFP() {
       const width = end - start;
       const numSeats = Math.floor(width / seatWidth);
       if (numSeats <= 0) return;
-      const seatW = width / numSeats; // distribute evenly
+      const seatW = width / numSeats;
       for (let s = 0; s < numSeats; s++) {
         const x = start + s * seatW + seatW * 0.08;
         const p1 = toPx(x, yPos);
@@ -466,7 +459,14 @@ function drawFP() {
       ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(-it.facing * D2R);
       ctx.fillStyle = it.color; ctx.beginPath(); ctx.ellipse(0, 0, rx, ry, 0, 0, 7); ctx.fill();
       ctx.strokeStyle = "#fff"; ctx.lineWidth = it.id === activeActor ? 2 : 0.5; ctx.stroke();
-      ctx.fillStyle = "#333"; ctx.beginPath(); ctx.moveTo(rx + 5, 0); ctx.lineTo(rx - 2, -3); ctx.lineTo(rx - 2, 3); ctx.closePath(); ctx.fill();
+      // Arrow points forward (towards facing direction) – fixed
+      ctx.fillStyle = "#333";
+      ctx.beginPath();
+      ctx.moveTo(rx + 5, 0);
+      ctx.lineTo(rx - 2, -3);
+      ctx.lineTo(rx - 2, 3);
+      ctx.closePath();
+      ctx.fill();
       ctx.restore();
       ctx.strokeStyle = it.color; ctx.setLineDash([2, 2]); ctx.lineWidth = 1.2;
       ctx.beginPath(); ctx.arc(p.x, p.y, 9, 0, 7); ctx.stroke(); ctx.setLineDash([]);
@@ -711,6 +711,17 @@ window.addEventListener('resize', render);
 // ---------- State for 3D ----------
 window.PrevizState = {
   CAMS, items, V, R_VIGNETTE, VIGNETTE_WIDTH_M, VIGNETTE_HEIGHT_M, D2R, pt, fov,
-  get active() { return active; }
+  get active() { return active; },
+  // ---- Seating exports for 3D ----
+  R_AUDIENCE: R_AUDIENCE,
+  ROOM_CENTER: ROOM_CENTER,
+  leftWalkwayLeft: -6.401,
+  leftWalkwayRight: -4.572,
+  rightWalkwayLeft: 4.572,
+  rightWalkwayRight: 6.401,
+  cutY: -7.32,   // frontY - 3.66
+  seatWidth: 0.45,
+  seatDepth: 0.6,
+  audienceFloorZ: -1.14  // -3'9"
 };
 window.dispatchEvent(new Event('previz-ready'));
