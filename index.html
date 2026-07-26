@@ -111,10 +111,14 @@
       <div class="vf-wrap">
         <canvas id="vf" width="640" height="360"></canvas>
         <canvas id="vf3d" width="960" height="540" style="display:none"></canvas>
-        <div class="hud">
+        <div class="hud" id="hud">
           <div id="hcam" class="hud-cam"></div>
           <div id="hlens" class="hud-lens"></div>
           <div id="hscale" class="hud-scale"></div>
+          <div id="hExtra" style="display:block; font-size:10px; color:#ccc; margin-top:4px;"></div>
+          <label style="display:block; margin-top:4px; font-size:10px; color:#aaa;">
+            <input type="checkbox" id="hudToggle" checked> Show extra info
+          </label>
         </div>
       </div>
     </div>
