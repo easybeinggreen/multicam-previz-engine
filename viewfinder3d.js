@@ -169,7 +169,7 @@ async function init3D() {
 
         // Facing rotation (spins around world Y)
         const facingRad = it.facing * state.D2R;
-        actorGroup.rotation.y = -facingRad + Math.PI / 2;
+        actorGroup.rotation.y = -facingRad - Math.PI / 2;
 
         actorGroup.updateMatrixWorld(true);
       } else {
