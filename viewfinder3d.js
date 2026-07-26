@@ -63,44 +63,36 @@ async function init3D() {
     scene.add(mesh);
   });
 
-  // --- Load Brian (upright, no skinning, just scale and place) ---
-  async function loadBrianModel() {
+  // --- Character model loading ---
+  // MODEL_URLS maps a character's modelKey (set in app.js's CHARACTERS
+  // config) to the .glb it should use. Elizabeth doesn't have her own
+  // model yet, so her modelKey ("brian") points at the same file as
+  // Brian's — when her real model exists, just add an "elizabeth" entry
+  // here and switch her modelKey in app.js to match. Nothing else about
+  // this loading/placement code needs to change.
+  const MODEL_URLS = { brian: './Brian_Upright.glb' };
+  const templateCache = new Map(); // modelKey -> {root, rawHeight} | null
+
+  // Loads a model *unscaled* — height/grounding are applied per-actor at
+  // clone time (see makeActorMesh), since different actors using the same
+  // model (e.g. Brian and proxy-Elizabeth) can want different heights.
+  async function loadCharacterTemplate(modelKey) {
+    const url = MODEL_URLS[modelKey] || MODEL_URLS.brian;
     const loader = new GLTFLoader();
-    const url = './Brian_Upright.glb';
-    console.log('🔄 Loading Brian from:', url);
+    console.log(`🔄 Loading character "${modelKey}" from:`, url);
     try {
       const gltf = await loader.loadAsync(url);
-      console.log('✅ GLTF loaded');
+      const root = new THREE.Group();
+      root.name = 'CharacterRoot';
+      root.add(gltf.scene);
 
-      const brianRoot = new THREE.Group();
-      brianRoot.name = 'BrianRoot';
-      brianRoot.add(gltf.scene);
-
-      // Measure raw height along Y (model is Y-up)
-      const box = new THREE.Box3().setFromObject(brianRoot);
+      const box = new THREE.Box3().setFromObject(root);
       const size = new THREE.Vector3();
       box.getSize(size);
-      console.log('📦 Raw height (Y):', size.y);
+      const rawHeight = size.y > 0.001 ? size.y : 1;
+      console.log(`📦 "${modelKey}" raw height (Y):`, rawHeight);
 
-      const currentHeight = size.y;
-      const desiredHeight = 1.8; // metres
-      if (currentHeight > 0.001) {
-        const scale = desiredHeight / currentHeight;
-        brianRoot.scale.set(scale, scale, scale);
-        console.log(`📏 Scaled: ${currentHeight.toFixed(2)} → ${desiredHeight}m (factor ${scale.toFixed(3)})`);
-      } else {
-        console.warn('⚠️ Height is zero, using scale 1');
-      }
-
-      // Shift so feet touch ground (min Y = 0)
-      brianRoot.updateMatrixWorld();
-      const groundBox = new THREE.Box3().setFromObject(brianRoot);
-      const feetY = groundBox.min.y;
-      console.log('🦶 Feet Y before shift:', feetY);
-      brianRoot.position.y = -feetY;
-
-      // Apply alabaster material
-      brianRoot.traverse((child) => {
+      root.traverse((child) => {
         if (child.isMesh) {
           child.material = new THREE.MeshStandardMaterial({
             color: 0xf5f0eb,
@@ -113,16 +105,58 @@ async function init3D() {
         }
       });
 
-      console.log('✅ Brian ready (upright, alabaster, feet on ground)');
-      return brianRoot;
+      console.log(`✅ "${modelKey}" template ready (alabaster, unscaled)`);
+      return { root, rawHeight };
     } catch (err) {
-      console.error('❌ Brian load failed:', err);
+      console.error(`❌ "${modelKey}" load failed:`, err);
       return null;
     }
   }
 
-  const brianTemplate = await loadBrianModel();
-  console.log('🧑‍🎨 Template is null?', brianTemplate === null);
+  async function getTemplate(modelKey) {
+    if (!templateCache.has(modelKey)) {
+      templateCache.set(modelKey, await loadCharacterTemplate(modelKey));
+    }
+    return templateCache.get(modelKey);
+  }
+
+  // Builds a placed, correctly-grounded actor mesh at a given desired
+  // height. Uses an outer "placement" group (world position/facing —
+  // set every frame in syncItems) with the scaled, grounded model nested
+  // as a child, so the ground offset survives the outer group's position
+  // being overwritten each frame.
+  function makeActorMesh(template, desiredHeight) {
+    const placement = new THREE.Group();
+    placement.userData = { isCharacter: true };
+    if (template) {
+      const model = template.root.clone(true);
+      const scale = desiredHeight / template.rawHeight;
+      model.scale.set(scale, scale, scale);
+      model.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(model);
+      model.position.y = -box.min.y; // feet to ground, local to placement group
+      placement.add(model);
+    } else {
+      // Fallback box (should rarely happen) — sized to this actor's height
+      console.warn('⚠️ No character model – fallback box');
+      const geo = new THREE.BoxGeometry(0.6, desiredHeight, 0.4);
+      const mat = new THREE.MeshStandardMaterial({ color: 0x8888ff });
+      const box = new THREE.Mesh(geo, mat);
+      box.castShadow = true;
+      box.receiveShadow = true;
+      box.position.y = desiredHeight / 2;
+      placement.add(box);
+    }
+    return placement;
+  }
+
+  // Preload the models referenced by the current items so the first
+  // frame doesn't pop in late.
+  await Promise.all(
+    [...new Set(state.items.filter(i => i.type === 'actor').map(i => i.modelKey || 'brian'))]
+      .map(getTemplate)
+  );
+
   const actorMeshes = new Map();
   const propMeshes = new Map();
   window.__scene = scene;
@@ -143,24 +177,30 @@ async function init3D() {
       if (it.type === 'actor') {
         let actorGroup = actorMeshes.get(it.id);
         if (!actorGroup) {
-          if (brianTemplate) {
-            actorGroup = brianTemplate.clone(true);
-            actorGroup.userData = { isBrian: true, actorId: it.id };
-            scene.add(actorGroup);
-            actorMeshes.set(it.id, actorGroup);
-            console.log(`➕ Added Brian for actor ${it.id}`);
-          } else {
-            // Fallback box (should rarely happen)
-            console.warn(`⚠️ No Brian model – fallback box for actor ${it.id}`);
-            const geo = new THREE.BoxGeometry(0.6, 1.8, 0.4);
-            const mat = new THREE.MeshStandardMaterial({ color: 0x8888ff });
-            const box = new THREE.Mesh(geo, mat);
-            box.castShadow = true;
-            box.receiveShadow = true;
-            box.userData = { isBrian: false, actorId: it.id };
-            scene.add(box);
-            actorMeshes.set(it.id, box);
-            actorGroup = box;
+          const modelKey = it.modelKey || 'brian';
+          const desiredHeight = it.h || 1.8;
+          const template = templateCache.get(modelKey) || null;
+          actorGroup = makeActorMesh(template, desiredHeight);
+          actorGroup.userData.actorId = it.id;
+          scene.add(actorGroup);
+          actorMeshes.set(it.id, actorGroup);
+          console.log(`➕ Added actor ${it.id} (${it.character || modelKey}, ${desiredHeight}m)`);
+
+          // If this modelKey hasn't been loaded/cached yet, kick off the
+          // load and swap the placeholder for the real model once ready.
+          if (!templateCache.has(modelKey)) {
+            getTemplate(modelKey).then(tmpl => {
+              const stillPresent = actorMeshes.get(it.id) === actorGroup;
+              if (tmpl && stillPresent) {
+                const rebuilt = makeActorMesh(tmpl, desiredHeight);
+                rebuilt.userData.actorId = it.id;
+                rebuilt.position.copy(actorGroup.position);
+                rebuilt.rotation.copy(actorGroup.rotation);
+                scene.remove(actorGroup);
+                scene.add(rebuilt);
+                actorMeshes.set(it.id, rebuilt);
+              }
+            });
           }
         }
 
