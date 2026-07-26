@@ -75,20 +75,15 @@ const SEAT_BLOCKS = [
 ];
 function local(x, yLocal) { return { x, y: yLocal - R_VIGNETTE }; }
 
-// Character presets for the "Add actor" dropdown. modelKey points at the
-// 3D model viewfinder3d.js should load for this character — Elizabeth has
-// no model of her own yet, so she's proxied onto Brian's model/rig until
-// hers exists (see MODEL_URLS in viewfinder3d.js). Her height (1.7m) is
-// already real and drives both the 2D sprite and the 3D scale, so swapping
-// in her own model later is a one-line change with no other side effects.
+// Character presets for the "Add actor" dropdown.
 const CHARACTERS = {
-  male: { label: "Brian", height: 1.8, color: "#378ADD", modelKey: "brian" },
-  female: { label: "Elizabeth", height: 1.7, color: "#B565D8", modelKey: "brian" }
+  male: { label: "Male actor", height: 1.8, color: "#378ADD", modelKey: "brian" },
+  female: { label: "Female actor", height: 1.7, color: "#B565D8", modelKey: "brian" }
 };
 
 let items = [
-  { id: 1, type: "actor", label: "Lead actor", x: STAGE_MARKS.V3.x, y: STAGE_MARKS.V3.y, z: 0, w: 0.7, d: 0.4, h: 1.8, facing: 270, color: "#1D9E75", standAt: "V3" },
-  { id: 2, type: "actor", label: "Support actor", x: STAGE_MARKS.V2.x, y: STAGE_MARKS.V2.y, z: 0, w: 0.65, d: 0.4, h: 1.7, facing: 302, color: "#D4537E", standAt: "V2" },
+  { id: 1, type: "actor", label: "Lead actor", x: STAGE_MARKS.V3.x, y: STAGE_MARKS.V3.y, z: 0, w: 0.7, d: 0.4, h: 1.8, facing: 270, color: "#1D9E75", standAt: "V3", character: "male", modelKey: "brian" },
+  { id: 2, type: "actor", label: "Support actor", x: STAGE_MARKS.V2.x, y: STAGE_MARKS.V2.y, z: 0, w: 0.65, d: 0.4, h: 1.7, facing: 302, color: "#D4537E", standAt: "V2", character: "female", modelKey: "brian" },
   { id: 3, type: "prop", label: "Table", x: STAGE_MARKS.V3.x + 2, y: STAGE_MARKS.V3.y, z: 0, w: 1.4, h: 0.9, color: "#FAC775" }
 ];
 
@@ -133,46 +128,106 @@ standSel.onchange = e => {
   render();
 };
 
+// Count existing male/female actors for naming
+function getActorCounts() {
+  let male = 0, female = 0;
+  items.forEach(i => {
+    if (i.type === 'actor') {
+      if (i.character === 'male') male++;
+      else if (i.character === 'female') female++;
+    }
+  });
+  return { male, female };
+}
+
 document.getElementById('addActor').onchange = e => {
   const choice = e.target.value;
   if (!choice) return;
   const conf = CHARACTERS[choice];
-  const id = Date.now();
+  const counts = getActorCounts();
+  let count = choice === 'male' ? counts.male + 1 : counts.female + 1;
+  const label = conf.label + " " + count;
+
   const keys = Object.keys(STAGE_MARKS);
   const markKey = keys[Math.floor(Math.random() * keys.length)];
   const mark = STAGE_MARKS[markKey];
   items.push({
-    id, type: "actor", label: conf.label, x: mark.x, y: mark.y, z: 0,
-    w: 0.7, d: 0.4, h: conf.height, facing: 270, color: conf.color,
-    standAt: markKey, character: choice, modelKey: conf.modelKey
+    id: Date.now(),
+    type: "actor",
+    label: label,
+    x: mark.x,
+    y: mark.y,
+    z: 0,
+    w: 0.7,   // internal drawing width
+    d: 0.4,   // internal drawing depth
+    h: conf.height,
+    facing: 270,
+    color: conf.color,
+    standAt: markKey,
+    character: choice,
+    modelKey: conf.modelKey
   });
-  activeActor = id; syncActorSel(); render();
-  e.target.value = ""; // reset to placeholder so it's ready to fire again
+  activeActor = items[items.length - 1].id;
+  syncActorSel();
+  render();
+  e.target.value = ""; // reset to placeholder
 };
-document.getElementById('bt').onclick = () => {
-  items.push({ id: Date.now(), type: "prop", label: "Table", x: ROOM_CENTER.x + (Math.random() - 0.5) * 6, y: ROOM_CENTER.y + (Math.random() - 0.5) * 10, z: 0, w: 1.4, h: 0.9, color: "#FAC775" });
+
+// Delete actor
+document.getElementById('deleteActor').onclick = () => {
+  if (!activeActor) return;
+  const idx = items.findIndex(i => i.id === activeActor && i.type === 'actor');
+  if (idx === -1) return;
+  items.splice(idx, 1);
+  const remaining = items.filter(i => i.type === 'actor');
+  activeActor = remaining.length > 0 ? remaining[0].id : null;
+  syncActorSel();
   render();
 };
 
 const actorSel = document.getElementById('actorsel');
 function syncActorSel() {
   actorSel.innerHTML = '';
-  items.filter(i => i.type === "actor").forEach(a => { const o = document.createElement('option'); o.value = a.id; o.innerText = a.label; actorSel.appendChild(o); });
-  actorSel.value = activeActor;
+  const actors = items.filter(i => i.type === 'actor');
+  actors.forEach(a => { const o = document.createElement('option'); o.value = a.id; o.innerText = a.label; actorSel.appendChild(o); });
+  if (actors.length > 0 && !actors.some(a => a.id === activeActor)) {
+    activeActor = actors[0].id;
+  }
+  actorSel.value = activeActor || '';
   syncActorFields();
 }
 actorSel.onchange = e => { activeActor = +e.target.value; syncActorFields(); };
-function curActor() { return items.find(i => i.id === activeActor); }
+function curActor() { return items.find(i => i.id === activeActor && i.type === 'actor'); }
 function syncActorFields() {
-  const a = curActor(); if (!a) return;
-  document.getElementById('faces').value = a.facing; document.getElementById('facev').innerText = a.facing + "°";
-  document.getElementById('ah').value = a.h; document.getElementById('aw').value = a.w; document.getElementById('ad').value = a.d;
-  standSel.value = a.standAt || "V3";
+  const a = curActor();
+  const ah = document.getElementById('ah');
+  const standAt = document.getElementById('standat');
+  const faces = document.getElementById('faces');
+  if (!a) {
+    ah.value = '';
+    standAt.value = '';
+    faces.value = 0;
+    document.getElementById('facev').innerText = '—';
+    return;
+  }
+  document.getElementById('faces').value = a.facing;
+  document.getElementById('facev').innerText = a.facing + "°";
+  ah.value = a.h;
+  standAt.value = a.standAt || "V3";
 }
-document.getElementById('faces').oninput = e => { curActor().facing = +e.target.value; document.getElementById('facev').innerText = e.target.value + "°"; render(); };
-document.getElementById('ah').onchange = e => { curActor().h = +e.target.value; render(); };
-document.getElementById('aw').onchange = e => { curActor().w = +e.target.value; render(); };
-document.getElementById('ad').onchange = e => { curActor().d = +e.target.value; render(); };
+document.getElementById('faces').oninput = e => {
+  const a = curActor();
+  if (!a) return;
+  a.facing = +e.target.value;
+  document.getElementById('facev').innerText = e.target.value + "°";
+  render();
+};
+document.getElementById('ah').onchange = e => {
+  const a = curActor();
+  if (!a) return;
+  a.h = +e.target.value;
+  render();
+};
 
 function syncControls() {
   const c = CAMS[active];
@@ -398,11 +453,19 @@ function drawVF() {
   drawFloorGrid(ctx, c, basis, angles, w, h);
   drawVignettePanels(ctx, c, basis, angles, w, h);
 
-  let headFrac = 0;
+  let closestActor = null, closestDepth = Infinity;
   const withDepth = items.map(it => {
     const base = project(c, basis, angles, w, h, it.x, it.y, it.z);
     return base ? { it, depth: base.depth } : null;
   }).filter(Boolean).sort((a, b) => b.depth - a.depth);
+
+  // Find the closest actor for the scale label
+  withDepth.forEach(({ it, depth }) => {
+    if (it.type === 'actor' && depth < closestDepth) {
+      closestDepth = depth;
+      closestActor = it;
+    }
+  });
 
   withDepth.forEach(({ it }) => {
     const base = project(c, basis, angles, w, h, it.x, it.y, it.z);
@@ -418,7 +481,6 @@ function drawVF() {
       const apparent = Math.abs(it.w * Math.cos(relRad)) + Math.abs(it.d * Math.sin(relRad));
       const pw = (apparent / base.depth) / Math.tan(angles.h / 2) * (w / 2);
       const ph = base.y - top.y;
-      if (headFrac === 0) headFrac = ph / h;
 
       // Ground shadow
       ctx.save(); ctx.globalAlpha = 0.18; ctx.fillStyle = "#000";
@@ -479,11 +541,19 @@ function drawVF() {
   document.getElementById('hcam').innerText = active.split(' ')[0];
   document.getElementById('hlens').innerText = c.lens + "mm";
   let scaleLbl = "Extreme wide (EWS)";
-  if (headFrac > 1.2) scaleLbl = "Extreme close-up (ECU)";
-  else if (headFrac > 0.8) scaleLbl = "Close-up (CU)";
-  else if (headFrac > 0.4) scaleLbl = "Medium (MS)";
-  else if (headFrac > 0.15) scaleLbl = "Medium wide (MWS)";
-  document.getElementById('hscale').innerText = "Lead: " + scaleLbl;
+  if (closestActor) {
+    // Compute head fraction for the closest actor
+    const base = project(c, basis, angles, w, h, closestActor.x, closestActor.y, closestActor.z);
+    const top = project(c, basis, angles, w, h, closestActor.x, closestActor.y, closestActor.z + closestActor.h);
+    if (base && top) {
+      const headFrac = (base.y - top.y) / h;
+      if (headFrac > 1.2) scaleLbl = "Extreme close-up (ECU)";
+      else if (headFrac > 0.8) scaleLbl = "Close-up (CU)";
+      else if (headFrac > 0.4) scaleLbl = "Medium (MS)";
+      else if (headFrac > 0.15) scaleLbl = "Medium wide (MWS)";
+    }
+  }
+  document.getElementById('hscale').innerText = "Closest actor: " + scaleLbl;
 }
 
 // ---------- Floor plan interaction: drag aim, drag items, pan, zoom ----------
