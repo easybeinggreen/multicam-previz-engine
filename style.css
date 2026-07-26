@@ -172,6 +172,7 @@ button:hover { border-color: var(--accent-dim); background: #f0f9f6; }
   display: flex;
   align-items: center;
   gap: 6px;
+  width: 100%;
 }
 
 .dist-label {
@@ -254,6 +255,18 @@ canvas {
 .hud-cam { font-weight: 600; }
 .hud-lens { color: #5DCAA5; }
 .hud-scale { color: #FAC775; }
+
+/* delete button next to actor dropdown */
+#deleteActor {
+  padding: 5px 8px;
+  line-height: 1;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+#deleteActor:hover {
+  background: #fde0e0;
+  border-color: #e57373;
+}
 
 @media (max-width: 1100px) {
   .controls-bar { flex-direction: column; }
