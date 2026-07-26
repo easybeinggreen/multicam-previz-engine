@@ -67,13 +67,6 @@ Object.keys(CAMS).forEach(k => {
   }
 });
 
-// Seating – three blocks
-const SEAT_ROWS = 25;
-const SEAT_FRONT_Y = -R_AUDIENCE;
-const SEAT_BACK_Y = -R_VIGNETTE - 5; // 5m behind room centre
-const LEFT_WALKWAY_X = -3.5;
-const RIGHT_WALKWAY_X = 3.5;
-
 // Character presets
 const CHARACTERS = {
   male: { label: "Male actor", height: 1.8, color: "#378ADD", modelKey: "brian" },
@@ -283,7 +276,7 @@ function project(c, basis, angles, w, h, px, py, pz) {
 
 function render() { updateDistance(); drawFP(); drawVF(); if (window.Previz3DRender) window.Previz3DRender(); }
 
-// ---------- Floor plan ----------
+// ---------- Floor plan (with accurate seating) ----------
 function drawFP() {
   const cv = document.getElementById('fp'), ctx = cv.getContext('2d');
   const dpr = window.devicePixelRatio || 1, rect = cv.getBoundingClientRect();
@@ -297,63 +290,98 @@ function drawFP() {
   const fromPx = (px, py) => ({ x: (px - cx) / scale + ROOM_CENTER.x, y: ROOM_CENTER.y - (py - cy) / scale });
   window._fpT = { toPx, fromPx };
 
-  // ---- Draw seating (three blocks) ----
-  const rowStep = (SEAT_BACK_Y - SEAT_FRONT_Y) / SEAT_ROWS;
-  const seatColor = "#c9c9cf";
-  const seatStroke = "#999";
-  ctx.fillStyle = seatColor;
-  ctx.strokeStyle = seatStroke;
+  // ---- Seating geometry ----
+  const centreX = 0, centreY = -R_VIGNETTE;
+  const radius = R_AUDIENCE;
+
+  // Walkway boundaries (in metres) – user provided: -21ft to -15ft and +15ft to +21ft
+  const leftWalkwayLeft = -6.401;   // -21ft
+  const leftWalkwayRight = -4.572;  // -15ft
+  const rightWalkwayLeft = 4.572;   // +15ft
+  const rightWalkwayRight = 6.401;  // +21ft
+
+  // Stage cut‑out: remove seats above (closer to stage) a chord 12ft back from the frontmost point
+  const frontY = centreY + radius;  // -3.66m (front edge of the circle)
+  const cutY = frontY - 3.66;       // -7.32m (12ft back)
+
+  // Back limit: the backmost point of the circle
+  const backY = centreY - radius;   // -32.66m
+
+  // Seat dimensions
+  const seatWidth = 0.45;
+  const seatDepth = 0.6;
+
+  // ---- Draw stage cut‑out area (semi‑transparent blue) ----
+  const dyCut = cutY - centreY;
+  const chordX = Math.sqrt(radius * radius - dyCut * dyCut);
+  const angle1 = Math.atan2(dyCut, -chordX);
+  const angle2 = Math.atan2(dyCut, chordX);
+  // If angle1 > angle2, swap to ensure the arc goes the correct way
+  // We want the arc that goes through the top (closest to stage) – that's the smaller segment.
+  // Since dyCut is positive (cutY > centreY), the top segment is the one above the chord.
+  // The angles: angle1 (left point) is around 2.3 rad, angle2 (right point) around 0.8 rad.
+  // We want the arc from angle1 to angle2 going clockwise (through PI/2).
+  ctx.beginPath();
+  ctx.moveTo(toPx(-chordX, cutY).x, toPx(-chordX, cutY).y);
+  ctx.arc(toPx(centreX, centreY).x, toPx(centreX, centreY).y, radius * scale, angle1, angle2, true);
+  ctx.closePath();
+  ctx.fillStyle = "rgba(100, 150, 255, 0.15)";
+  ctx.strokeStyle = "#4488ff";
+  ctx.lineWidth = 2;
+  ctx.fill();
+  ctx.stroke();
+
+  // ---- Draw seats ----
+  ctx.fillStyle = "#c9c9cf";
+  ctx.strokeStyle = "#999";
   ctx.lineWidth = 0.5;
 
-  // Helper: circle x at a given y (shifted coords)
-  const circleX = (y) => {
-    const dy = y + R_VIGNETTE;
-    const r2 = R_AUDIENCE * R_AUDIENCE - dy * dy;
-    if (r2 < 0) return null;
-    return Math.sqrt(r2);
-  };
+  let y = backY;
+  while (y <= cutY) {  // stop at the cut‑off chord
+    const dy = y - centreY;
+    const r2 = radius * radius - dy * dy;
+    if (r2 <= 0) { y += seatDepth; continue; }
+    const xCirc = Math.sqrt(r2);
+    const leftBound = -xCirc;
+    const rightBound = xCirc;
 
-  // Draw a row of seats
-  function drawRow(y, xStart, xEnd, seats) {
-    const width = xEnd - xStart;
-    const seatW = width / seats;
-    for (let s = 0; s < seats; s++) {
-      const x = xStart + s * seatW + seatW * 0.08;
-      const p = toPx(x, y);
-      const p2 = toPx(x + seatW * 0.8, y - rowStep * 0.55);
-      const ww = Math.abs(p2.x - p.x);
-      const hh = Math.abs(p2.y - p.y);
-      if (ww < 1 || hh < 1) continue;
-      ctx.fillRect(Math.min(p.x, p2.x), Math.min(p.y, p2.y), ww, hh);
-      ctx.strokeRect(Math.min(p.x, p2.x), Math.min(p.y, p2.y), ww, hh);
+    // Define block boundaries
+    // Left block: from leftBound to leftWalkwayLeft
+    const leftBlockStart = leftBound;
+    const leftBlockEnd = leftWalkwayLeft; // -6.401
+    // Centre block: from leftWalkwayRight to rightWalkwayLeft
+    const centreBlockStart = leftWalkwayRight; // -4.572
+    const centreBlockEnd = rightWalkwayLeft;   // 4.572
+    // Right block: from rightWalkwayRight to rightBound
+    const rightBlockStart = rightWalkwayRight; // 6.401
+    const rightBlockEnd = rightBound;
+
+    function drawBlock(start, end, yPos) {
+      if (end <= start) return;
+      const width = end - start;
+      const numSeats = Math.floor(width / seatWidth);
+      if (numSeats <= 0) return;
+      const seatW = width / numSeats; // distribute evenly
+      for (let s = 0; s < numSeats; s++) {
+        const x = start + s * seatW + seatW * 0.08;
+        const p1 = toPx(x, yPos);
+        const p2 = toPx(x + seatW * 0.8, yPos - seatDepth * 0.55);
+        const ww = Math.abs(p2.x - p1.x);
+        const hh = Math.abs(p2.y - p1.y);
+        if (ww < 1 || hh < 1) continue;
+        ctx.fillRect(Math.min(p1.x, p2.x), Math.min(p1.y, p2.y), ww, hh);
+        ctx.strokeRect(Math.min(p1.x, p2.x), Math.min(p1.y, p2.y), ww, hh);
+      }
     }
+
+    drawBlock(leftBlockStart, leftBlockEnd, y);
+    drawBlock(centreBlockStart, centreBlockEnd, y);
+    drawBlock(rightBlockStart, rightBlockEnd, y);
+
+    y += seatDepth;
   }
 
-  for (let r = 0; r < SEAT_ROWS; r++) {
-    const y = SEAT_FRONT_Y + r * rowStep;
-    // Central block
-    const centralWidth = RIGHT_WALKWAY_X - LEFT_WALKWAY_X;
-    const centralSeats = Math.floor(centralWidth / 0.4);
-    if (centralSeats > 0) drawRow(y, LEFT_WALKWAY_X, RIGHT_WALKWAY_X, centralSeats);
-
-    // Left block
-    const leftX = circleX(y);
-    if (leftX !== null && leftX > LEFT_WALKWAY_X) {
-      const leftWidth = leftX - LEFT_WALKWAY_X;
-      const leftSeats = Math.floor(leftWidth / 0.4);
-      if (leftSeats > 0) drawRow(y, LEFT_WALKWAY_X, leftX, leftSeats);
-    }
-
-    // Right block
-    const rightX = -circleX(y);
-    if (rightX !== null && rightX < RIGHT_WALKWAY_X) {
-      const rightWidth = RIGHT_WALKWAY_X - rightX;
-      const rightSeats = Math.floor(rightWidth / 0.4);
-      if (rightSeats > 0) drawRow(y, rightX, RIGHT_WALKWAY_X, rightSeats);
-    }
-  }
-
-  // ---- Draw stage floor (ring) ----
+  // ---- Draw stage floor (ring from R_AUDIENCE to R_VIGNETTE) ----
   ctx.fillStyle = "#e8e4df";
   ctx.strokeStyle = "#d0ccc6";
   ctx.lineWidth = 1;
