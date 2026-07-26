@@ -75,6 +75,17 @@ const SEAT_BLOCKS = [
 ];
 function local(x, yLocal) { return { x, y: yLocal - R_VIGNETTE }; }
 
+// Character presets for the "Add actor" dropdown. modelKey points at the
+// 3D model viewfinder3d.js should load for this character — Elizabeth has
+// no model of her own yet, so she's proxied onto Brian's model/rig until
+// hers exists (see MODEL_URLS in viewfinder3d.js). Her height (1.7m) is
+// already real and drives both the 2D sprite and the 3D scale, so swapping
+// in her own model later is a one-line change with no other side effects.
+const CHARACTERS = {
+  male: { label: "Brian", height: 1.8, color: "#378ADD", modelKey: "brian" },
+  female: { label: "Elizabeth", height: 1.7, color: "#B565D8", modelKey: "brian" }
+};
+
 let items = [
   { id: 1, type: "actor", label: "Lead actor", x: STAGE_MARKS.V3.x, y: STAGE_MARKS.V3.y, z: 0, w: 0.7, d: 0.4, h: 1.8, facing: 270, color: "#1D9E75", standAt: "V3" },
   { id: 2, type: "actor", label: "Support actor", x: STAGE_MARKS.V2.x, y: STAGE_MARKS.V2.y, z: 0, w: 0.65, d: 0.4, h: 1.7, facing: 302, color: "#D4537E", standAt: "V2" },
@@ -122,13 +133,21 @@ standSel.onchange = e => {
   render();
 };
 
-document.getElementById('ba').onclick = () => {
+document.getElementById('addActor').onchange = e => {
+  const choice = e.target.value;
+  if (!choice) return;
+  const conf = CHARACTERS[choice];
   const id = Date.now();
   const keys = Object.keys(STAGE_MARKS);
   const markKey = keys[Math.floor(Math.random() * keys.length)];
   const mark = STAGE_MARKS[markKey];
-  items.push({ id, type: "actor", label: "Actor", x: mark.x, y: mark.y, z: 0, w: 0.7, d: 0.4, h: 1.8, facing: 270, color: "#378ADD", standAt: markKey });
+  items.push({
+    id, type: "actor", label: conf.label, x: mark.x, y: mark.y, z: 0,
+    w: 0.7, d: 0.4, h: conf.height, facing: 270, color: conf.color,
+    standAt: markKey, character: choice, modelKey: conf.modelKey
+  });
   activeActor = id; syncActorSel(); render();
+  e.target.value = ""; // reset to placeholder so it's ready to fire again
 };
 document.getElementById('bt').onclick = () => {
   items.push({ id: Date.now(), type: "prop", label: "Table", x: ROOM_CENTER.x + (Math.random() - 0.5) * 6, y: ROOM_CENTER.y + (Math.random() - 0.5) * 10, z: 0, w: 1.4, h: 0.9, color: "#FAC775" });
