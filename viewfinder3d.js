@@ -1,10 +1,8 @@
-// ===== FINAL FIX – Skinning stripped, bright red, big axes, auto-orient =====
+// ===== Final loader for upright Brian (no rotations, just scale & ground) =====
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-function worldToThree(x, y, z) { 
-  return new THREE.Vector3(x, z, -y); 
-}
+function worldToThree(x, y, z) { return new THREE.Vector3(x, z, -y); }
 
 async function init3D() {
   const canvas3d = document.getElementById('vf3d');
@@ -12,40 +10,35 @@ async function init3D() {
   const canvas2d = document.getElementById('vf');
   if (!canvas3d || !toggle) return;
 
-  let renderer;
-  try {
-    renderer = new THREE.WebGLRenderer({ canvas: canvas3d, antialias: true });
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.2;
-  } catch (err) {
-    console.warn('3D viewfinder unavailable — WebGL could not initialise. Staying on 2D.', err);
-    return;
-  }
-
-  canvas3d.addEventListener('webglcontextlost', (e) => {
-    e.preventDefault();
-    console.error('❌ WebGL context was lost.');
-  });
-  canvas3d.addEventListener('webglcontextrestored', () => {
-    console.warn('✅ WebGL context restored.');
-  });
+  const renderer = new THREE.WebGLRenderer({ canvas: canvas3d, antialias: true });
+  renderer.shadowMap.enabled = true;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.2;
 
   const state = window.PrevizState;
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0xf5f0eb);
-  
   const camera = new THREE.PerspectiveCamera(50, 16 / 9, 0.1, 200);
 
   // Lighting
-  scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
   const mainLight = new THREE.DirectionalLight(0xffeedd, 1.5);
   mainLight.position.set(10, 15, 10);
   mainLight.castShadow = true;
   mainLight.shadow.mapSize.set(2048, 2048);
+  mainLight.shadow.camera.left = -20;
+  mainLight.shadow.camera.right = 20;
+  mainLight.shadow.camera.top = 20;
+  mainLight.shadow.camera.bottom = -20;
   scene.add(mainLight);
+  const fillLight = new THREE.DirectionalLight(0x8888ff, 0.3);
+  fillLight.position.set(-10, 5, -10);
+  scene.add(fillLight);
+  const rimLight = new THREE.DirectionalLight(0xffffff, 0.2);
+  rimLight.position.set(0, 10, -20);
+  scene.add(rimLight);
 
+  // Ground
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(80, 80),
     new THREE.MeshStandardMaterial({ color: 0xe8e4df, roughness: 0.8 })
@@ -54,7 +47,7 @@ async function init3D() {
   ground.receiveShadow = true;
   scene.add(ground);
 
-  // Vignette panels (if any)
+  // Vignette panels (back walls)
   Object.entries(state.V).forEach(([name, ang]) => {
     const rad = ang * state.D2R;
     const center = state.pt(ang, state.R_VIGNETTE);
@@ -70,146 +63,66 @@ async function init3D() {
     scene.add(mesh);
   });
 
-  // --- Load Brian, fully automatic orientation, strip skinning, bright red ---
+  // --- Load Brian (upright, no skinning, just scale and place) ---
   async function loadBrianModel() {
     const loader = new GLTFLoader();
-    const url = './Brian_Final.glb';
+    const url = './Brian_Upright.glb';
     console.log('🔄 Loading Brian from:', url);
     try {
       const gltf = await loader.loadAsync(url);
       console.log('✅ GLTF loaded');
 
-      // 1. Wrap original scene
-      const modelRoot = new THREE.Group();
-      modelRoot.add(gltf.scene);
+      const brianRoot = new THREE.Group();
+      brianRoot.name = 'BrianRoot';
+      brianRoot.add(gltf.scene);
 
-      // 2. Measure raw bounding box
-      modelRoot.updateMatrixWorld();
-      const rawBox = new THREE.Box3().setFromObject(modelRoot);
-      const rawSize = new THREE.Vector3();
-      rawBox.getSize(rawSize);
-      console.log('📦 Raw bounding box (X,Y,Z):', rawSize.x, rawSize.y, rawSize.z);
+      // Measure raw height along Y (model is Y-up)
+      const box = new THREE.Box3().setFromObject(brianRoot);
+      const size = new THREE.Vector3();
+      box.getSize(size);
+      console.log('📦 Raw height (Y):', size.y);
 
-      const { x: dx, y: dy, z: dz } = rawSize;
-      let heightAxis = 'y';
-      let standRotation = null;
-
-      if (dz >= dy && dz >= dx) {
-        heightAxis = 'z';
-        standRotation = new THREE.Euler(-Math.PI / 2, 0, 0); // Z -> Y (rotate -90° around X)
-        console.log('🔄 Height axis is Z, rotating -90° around X');
-      } else if (dx >= dy && dx >= dz) {
-        heightAxis = 'x';
-        standRotation = new THREE.Euler(0, 0, -Math.PI / 2); // X -> Y
-        console.log('🔄 Height axis is X, rotating -90° around Z');
-      } else {
-        console.log('🔄 Height axis is Y, no rotation needed');
-      }
-
-      // Apply stand rotation inside a helper group
-      if (standRotation) {
-        const rotator = new THREE.Group();
-        rotator.rotation.copy(standRotation);
-        while (modelRoot.children.length) {
-          rotator.add(modelRoot.children[0]);
-        }
-        modelRoot.add(rotator);
-        modelRoot.updateMatrixWorld();
-      }
-
-      // 3. Check for upside-down
-      const uprightBox = new THREE.Box3().setFromObject(modelRoot);
-      // Original feet point (raw min Z, assuming feet at min Z)
-      const originalFeet = new THREE.Vector3(0, 0, rawBox.min.z);
-      if (standRotation) {
-        const rotMatrix = new THREE.Matrix4().makeRotationFromEuler(standRotation);
-        originalFeet.applyMatrix4(rotMatrix);
-      }
-      console.log('🔍 Predicted feet Y after rotation:', originalFeet.y);
-      if (originalFeet.y > uprightBox.max.y - 0.1) {
-        console.log('🙃 Model upside‑down, flipping 180° around X');
-        const flipper = new THREE.Group();
-        flipper.rotation.x = Math.PI;
-        while (modelRoot.children.length) {
-          flipper.add(modelRoot.children[0]);
-        }
-        modelRoot.add(flipper);
-        modelRoot.updateMatrixWorld();
-      }
-
-      // 4. Strip skinning and convert to static meshes
-      const staticGroup = new THREE.Group();
-      modelRoot.updateMatrixWorld(); // ensure transforms are up-to-date
-      modelRoot.traverse((child) => {
-        if (child.isMesh || child.isSkinnedMesh) {
-          const geo = child.geometry.clone();
-          // Remove skinning attributes if present
-          if (geo.attributes.skinIndex) geo.deleteAttribute('skinIndex');
-          if (geo.attributes.skinWeight) geo.deleteAttribute('skinWeight');
-          // Remove morph attributes
-          if (geo.morphAttributes) {
-            for (const key in geo.morphAttributes) {
-              delete geo.morphAttributes[key];
-            }
-          }
-          const mesh = new THREE.Mesh(geo, child.material.clone());
-          // Apply the same world transform from the original node
-          child.updateWorldMatrix(true, false);
-          mesh.applyMatrix4(child.matrixWorld);
-          staticGroup.add(mesh);
-        }
-      });
-
-      // Clear modelRoot and replace with the static group
-      while (modelRoot.children.length) modelRoot.remove(modelRoot.children[0]);
-      modelRoot.add(staticGroup);
-
-      // 5. Scale to 1.8m
-      const finalBox = new THREE.Box3().setFromObject(modelRoot);
-      const finalSize = new THREE.Vector3();
-      finalBox.getSize(finalSize);
-      console.log('📦 Final static box size:', finalSize);
-      const currentHeight = finalSize.y;
-      const desiredHeight = 1.8;
+      const currentHeight = size.y;
+      const desiredHeight = 1.8; // metres
       if (currentHeight > 0.001) {
         const scale = desiredHeight / currentHeight;
-        modelRoot.scale.set(scale, scale, scale);
-        console.log(`📏 Brian scaled: ${currentHeight.toFixed(2)} → ${desiredHeight}m`);
+        brianRoot.scale.set(scale, scale, scale);
+        console.log(`📏 Scaled: ${currentHeight.toFixed(2)} → ${desiredHeight}m (factor ${scale.toFixed(3)})`);
       } else {
-        console.warn('⚠️ Brian height is zero – using scale 1');
+        console.warn('⚠️ Height is zero, using scale 1');
       }
 
-      // 6. Shift feet to ground
-      modelRoot.updateMatrixWorld();
-      const groundBox = new THREE.Box3().setFromObject(modelRoot);
+      // Shift so feet touch ground (min Y = 0)
+      brianRoot.updateMatrixWorld();
+      const groundBox = new THREE.Box3().setFromObject(brianRoot);
       const feetY = groundBox.min.y;
       console.log('🦶 Feet Y before shift:', feetY);
-      modelRoot.position.y = -feetY;
+      brianRoot.position.y = -feetY;
 
-      // 7. Apply BRIGHT RED material
-      modelRoot.traverse((child) => {
+      // Apply alabaster material
+      brianRoot.traverse((child) => {
         if (child.isMesh) {
           child.material = new THREE.MeshStandardMaterial({
-            color: 0xff0000,
-            roughness: 0.5,
+            color: 0xf5f0eb,
+            roughness: 0.9,
             metalness: 0.0,
-            emissive: new THREE.Color(0x330000),
+            emissive: new THREE.Color(0x000000),
           });
           child.castShadow = true;
           child.receiveShadow = true;
         }
       });
 
-      console.log('✅ Bright red Brian ready with static meshes');
-      return modelRoot;
+      console.log('✅ Brian ready (upright, alabaster, feet on ground)');
+      return brianRoot;
     } catch (err) {
-      console.error('❌ Brian load failed:', err.message, err);
+      console.error('❌ Brian load failed:', err);
       return null;
     }
   }
 
   const brianTemplate = await loadBrianModel();
-  console.log('🧑‍🎨 Brian template is null?', brianTemplate === null);
+  console.log('🧑‍🎨 Template is null?', brianTemplate === null);
   const actorMeshes = new Map();
   const propMeshes = new Map();
   window.__scene = scene;
@@ -218,8 +131,13 @@ async function init3D() {
   function syncItems() {
     const liveIds = new Set(state.items.map(i => i.id));
     
-    actorMeshes.forEach((mesh, id) => { if (!liveIds.has(id)) { scene.remove(mesh); actorMeshes.delete(id); } });
-    propMeshes.forEach((mesh, id) => { if (!liveIds.has(id)) { scene.remove(mesh); propMeshes.delete(id); } });
+    // Remove old actors and props
+    actorMeshes.forEach((mesh, id) => {
+      if (!liveIds.has(id)) { scene.remove(mesh); actorMeshes.delete(id); }
+    });
+    propMeshes.forEach((mesh, id) => {
+      if (!liveIds.has(id)) { scene.remove(mesh); propMeshes.delete(id); }
+    });
 
     state.items.forEach(it => {
       if (it.type === 'actor') {
@@ -230,16 +148,15 @@ async function init3D() {
             actorGroup.userData = { isBrian: true, actorId: it.id };
             scene.add(actorGroup);
             actorMeshes.set(it.id, actorGroup);
-            // Add big axis helper at the actor's feet
-            const bigAxes = new THREE.AxesHelper(5);
-            actorGroup.add(bigAxes);
-            console.log(`➕ Added Brian for actor ${it.id} with BIG AXES (5m)`);
+            console.log(`➕ Added Brian for actor ${it.id}`);
           } else {
+            // Fallback box (should rarely happen)
             console.warn(`⚠️ No Brian model – fallback box for actor ${it.id}`);
             const geo = new THREE.BoxGeometry(0.6, 1.8, 0.4);
             const mat = new THREE.MeshStandardMaterial({ color: 0x8888ff });
             const box = new THREE.Mesh(geo, mat);
-            box.castShadow = true; box.receiveShadow = true;
+            box.castShadow = true;
+            box.receiveShadow = true;
             box.userData = { isBrian: false, actorId: it.id };
             scene.add(box);
             actorMeshes.set(it.id, box);
@@ -247,7 +164,7 @@ async function init3D() {
           }
         }
 
-        // Position at world location (feet already at ground)
+        // Place at world position (feet already at ground)
         actorGroup.position.copy(worldToThree(it.x, it.y, 0));
 
         // Facing rotation (spins around world Y)
@@ -256,12 +173,14 @@ async function init3D() {
 
         actorGroup.updateMatrixWorld(true);
       } else {
+        // Props (cuboid)
         let m = propMeshes.get(it.id);
         if (!m) {
           const geo = new THREE.BoxGeometry(it.w, it.h, it.w * 0.7);
           const mat = new THREE.MeshStandardMaterial({ color: it.color, roughness: 0.7 });
           m = new THREE.Mesh(geo, mat);
-          m.castShadow = true; m.receiveShadow = true;
+          m.castShadow = true;
+          m.receiveShadow = true;
           scene.add(m);
           propMeshes.set(it.id, m);
         }
@@ -273,7 +192,7 @@ async function init3D() {
   function resize() {
     const rect = canvas3d.getBoundingClientRect();
     if (rect.width < 1 || rect.height < 1) return;
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(rect.width, rect.height, false);
     camera.aspect = rect.width / rect.height;
     camera.updateProjectionMatrix();
@@ -318,6 +237,7 @@ async function init3D() {
   canvas2d.style.display = 'none';
   canvas3d.style.display = 'block';
 
+  // Initial sync and start render loop
   syncItems();
   requestAnimationFrame(frameLoop);
 }
