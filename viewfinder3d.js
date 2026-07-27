@@ -1,4 +1,4 @@
-// ===== Final 3D viewer with audience, stage, and HUD =====
+// ===== Final 3D viewer with audience, stage, and compact HUD =====
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
@@ -19,7 +19,6 @@ async function init3D() {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0xf5f0eb);
 
-  // ---- Camera (perspective) ----
   const camera = new THREE.PerspectiveCamera(50, 16 / 9, 0.1, 200);
 
   // ---- Lighting ----
@@ -40,11 +39,10 @@ async function init3D() {
   rimLight.position.set(0, 10, -20);
   scene.add(rimLight);
 
-  // ---- Get 3D centre of the auditorium ----
   const roomCenter3D = worldToThree(state.ROOM_CENTER.x, state.ROOM_CENTER.y, 0);
 
-  // ---- Stage floor (ring from R_AUDIENCE to R_VIGNETTE, at z=0) ----
-  const stageRingGeo = new THREE.RingGeometry(state.R_AUDIENCE, state.R_VIGNETTE, 64);
+  // ---- Stage floor (ring) – increased segments, rotated to hide seam ----
+  const stageRingGeo = new THREE.RingGeometry(state.R_AUDIENCE, state.R_VIGNETTE, 128);
   const stageRingMat = new THREE.MeshStandardMaterial({
     color: 0xe0e0e0,
     roughness: 0.7,
@@ -53,11 +51,12 @@ async function init3D() {
   });
   const stageRing = new THREE.Mesh(stageRingGeo, stageRingMat);
   stageRing.rotation.x = -Math.PI / 2;
+  stageRing.rotation.z = Math.PI / 128; // slight rotation to hide seam
   stageRing.position.copy(roomCenter3D);
   stageRing.receiveShadow = true;
   scene.add(stageRing);
 
-  // ---- Audience floor (below stage by 1.14m) ----
+  // ---- Audience floor ----
   const audienceFloorPos = worldToThree(state.ROOM_CENTER.x, state.ROOM_CENTER.y, state.audienceFloorZ);
   const floorGeo = new THREE.CircleGeometry(state.R_AUDIENCE, 64);
   const floorMat = new THREE.MeshStandardMaterial({
@@ -72,9 +71,9 @@ async function init3D() {
   audienceFloor.receiveShadow = true;
   scene.add(audienceFloor);
 
-  // ---- Step wall (vertical drop from stage to audience pit) ----
+  // ---- Step wall ----
   const wallHeight = 1.14;
-  const wallGeo = new THREE.CylinderGeometry(state.R_AUDIENCE, state.R_AUDIENCE, wallHeight, 64, 1, true);
+  const wallGeo = new THREE.CylinderGeometry(state.R_AUDIENCE, state.R_AUDIENCE, wallHeight, 128, 1, true);
   const wallMat = new THREE.MeshStandardMaterial({
     color: 0x888888,
     roughness: 0.6,
@@ -87,7 +86,7 @@ async function init3D() {
   stepWall.receiveShadow = true;
   scene.add(stepWall);
 
-  // ---- Generate seat positions (same logic as drawFP) ----
+  // ---- Seating positions (same as before) ----
   function getSeatPositions() {
     const positions = [];
     const { R_AUDIENCE, ROOM_CENTER, leftWalkwayLeft, leftWalkwayRight, rightWalkwayLeft, rightWalkwayRight, cutY, seatWidth, seatDepth } = state;
@@ -134,7 +133,6 @@ async function init3D() {
   const seatPositions = getSeatPositions();
   console.log(`Creating ${seatPositions.length} seats in 3D`);
 
-  // ---- Create seat boxes ----
   const seatGroup = new THREE.Group();
   const seatMat = new THREE.MeshStandardMaterial({ color: 0xb0b0b0, roughness: 0.6 });
   const seatGeo = new THREE.BoxGeometry(state.seatWidth * 0.8, 0.1, state.seatDepth * 0.7);
@@ -142,7 +140,6 @@ async function init3D() {
     const seat = new THREE.Mesh(seatGeo, seatMat);
     const threePos = worldToThree(pos.x, pos.y, state.audienceFloorZ + 0.05);
     seat.position.copy(threePos);
-    // Orient each seat to face the centre (0, ROOM_CENTER.y)
     const dx = 0 - pos.x;
     const dy = ROOM_CENTER.y - pos.y;
     const angle = Math.atan2(dy, dx);
@@ -153,13 +150,13 @@ async function init3D() {
   });
   scene.add(seatGroup);
 
-  // ---- Vignette panels with pastel colours ----
+  // ---- Vignette panels ----
   const vignetteColors = {
-    V1: 0xaaccff, // light blue
-    V2: 0xffdd99, // light yellow
-    V3: 0x99dd99, // light green
-    V4: 0xff99cc, // light pink
-    V5: 0xcc99ff  // light purple
+    V1: 0xaaccff,
+    V2: 0xffdd99,
+    V3: 0x99dd99,
+    V4: 0xff99cc,
+    V5: 0xcc99ff
   };
   Object.entries(state.V).forEach(([name, ang]) => {
     const rad = ang * state.D2R;
@@ -180,7 +177,7 @@ async function init3D() {
     scene.add(mesh);
   });
 
-  // ---- Character model loading (whiter material) ----
+  // ---- Character model loading ----
   const MODEL_URLS = { brian: './Brian_Upright.glb' };
   const templateCache = new Map();
 
@@ -200,7 +197,6 @@ async function init3D() {
       const rawHeight = size.y > 0.001 ? size.y : 1;
       console.log(`📦 "${modelKey}" raw height (Y):`, rawHeight);
 
-      // Make model whiter
       root.traverse((child) => {
         if (child.isMesh) {
           child.material = new THREE.MeshStandardMaterial({
@@ -241,7 +237,6 @@ async function init3D() {
       model.position.y = -box.min.y;
       placement.add(model);
     } else {
-      // fallback box
       const geo = new THREE.BoxGeometry(0.6, desiredHeight, 0.4);
       const mat = new THREE.MeshStandardMaterial({ color: 0x8888ff });
       const box = new THREE.Mesh(geo, mat);
@@ -253,7 +248,6 @@ async function init3D() {
     return placement;
   }
 
-  // Preload models
   await Promise.all(
     [...new Set(state.items.filter(i => i.type === 'actor').map(i => i.modelKey || 'brian'))]
       .map(getTemplate)
@@ -302,7 +296,6 @@ async function init3D() {
         actorGroup.rotation.y = -facingRad - Math.PI / 2;
         actorGroup.updateMatrixWorld(true);
       } else {
-        // Props
         let m = propMeshes.get(it.id);
         if (!m) {
           const geo = new THREE.BoxGeometry(it.w, it.h, it.w * 0.7);
@@ -328,61 +321,33 @@ async function init3D() {
   }
   window.addEventListener('resize', resize);
 
-  // ---- HUD update ----
+  // ---- Compact HUD update (no toggle) ----
   function updateHUD(cam) {
     const hcam = document.getElementById('hcam');
     const hlens = document.getElementById('hlens');
-    const hscale = document.getElementById('hscale');
     const hExtra = document.getElementById('hExtra');
     if (!hExtra) return;
 
     const camHeight = cam.z;
-    const focalHeight = cam.aimZ;
-    const fovDeg = (state.fov(cam.lens).v * 180 / Math.PI).toFixed(1);
+    const focalLength = cam.lens;
 
-    // Find actors in view
-    const inView = [];
-    const basis = state.camBasis(cam);
-    const angles = state.fov(cam.lens);
-    const rect = canvas3d.getBoundingClientRect();
-    const w = rect.width, h = rect.height;
-    if (w > 0 && h > 0) {
-      state.items.forEach(it => {
-        if (it.type !== 'actor') return;
-        const proj = state.project(cam, basis, angles, w, h, it.x, it.y, it.z);
-        if (proj && proj.x >= 0 && proj.x <= w && proj.y >= 0 && proj.y <= h) {
-          const dx = cam.x - it.x, dy = cam.y - it.y, dz = cam.z - it.z;
-          const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
-          inView.push({ label: it.label, dist: dist });
-        }
-      });
-    } else {
-      state.items.forEach(it => {
-        if (it.type !== 'actor') return;
-        const dx = cam.x - it.x, dy = cam.y - it.y, dz = cam.z - it.z;
-        const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
-        inView.push({ label: it.label, dist: dist });
-      });
-    }
+    // Get all actors, sorted by distance
+    const actors = [];
+    state.items.forEach(it => {
+      if (it.type !== 'actor') return;
+      const dx = cam.x - it.x, dy = cam.y - it.y, dz = cam.z - it.z;
+      const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+      actors.push({ label: it.label, dist: dist });
+    });
+    actors.sort((a,b) => a.dist - b.dist);
 
-    inView.sort((a,b) => a.dist - b.dist);
-    let actorList = inView.map(a => `${a.label} (${a.dist.toFixed(1)}m)`).join(', ');
+    let actorList = actors.map(a => `${a.label} (${a.dist.toFixed(1)}m)`).join(', ');
     if (actorList.length === 0) actorList = 'none';
 
-    hExtra.innerHTML = `
-      <div>Height: ${camHeight.toFixed(2)}m | Focal height: ${focalHeight.toFixed(2)}m</div>
-      <div>Field of view: ${fovDeg}°</div>
-      <div>Actors in view: ${actorList}</div>
-    `;
-  }
-
-  // Toggle extra HUD
-  const hudToggle = document.getElementById('hudToggle');
-  if (hudToggle) {
-    hudToggle.addEventListener('change', () => {
-      const extra = document.getElementById('hExtra');
-      if (extra) extra.style.display = hudToggle.checked ? 'block' : 'none';
-    });
+    // Update HUD elements
+    hcam.innerText = state.active;
+    hlens.innerText = `Height: ${camHeight.toFixed(2)}m | Focal: ${focalLength}mm`;
+    hExtra.innerHTML = `Actors: ${actorList}`;
   }
 
   // ---- Main render loop ----
@@ -405,7 +370,6 @@ async function init3D() {
     }
   };
 
-  // ---- Start loop ----
   let use3dActive = true;
   function frameLoop() {
     if (use3dActive && window.Previz3DRender) {
