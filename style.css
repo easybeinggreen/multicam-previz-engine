@@ -256,8 +256,8 @@ canvas {
   border-radius: 4px;
   pointer-events: none;
   max-width: 90%;
+  line-height: 1.4;
 }
-.hud label { pointer-events: auto; cursor: pointer; }
 .hud-cam { font-weight: 600; }
 .hud-lens { color: #5DCAA5; }
 .hud-scale { color: #FAC775; }
