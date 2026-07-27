@@ -40,33 +40,52 @@ async function init3D() {
   rimLight.position.set(0, 10, -20);
   scene.add(rimLight);
 
-  // ---- Ground (stage floor ring) ----
-  const ringGeo = new THREE.RingGeometry(state.R_AUDIENCE, state.R_VIGNETTE, 64);
-  const ringMat = new THREE.MeshStandardMaterial({
-    color: 0xd0d0d0,
+  // ---- Get 3D centre of the auditorium ----
+  const roomCenter3D = worldToThree(state.ROOM_CENTER.x, state.ROOM_CENTER.y, 0);
+
+  // ---- Stage floor (ring from R_AUDIENCE to R_VIGNETTE, at z=0) ----
+  const stageRingGeo = new THREE.RingGeometry(state.R_AUDIENCE, state.R_VIGNETTE, 64);
+  const stageRingMat = new THREE.MeshStandardMaterial({
+    color: 0xe0e0e0,
     roughness: 0.7,
     metalness: 0.1,
     side: THREE.DoubleSide,
   });
-  const stageRing = new THREE.Mesh(ringGeo, ringMat);
+  const stageRing = new THREE.Mesh(stageRingGeo, stageRingMat);
   stageRing.rotation.x = -Math.PI / 2;
-  stageRing.position.set(0, 0, 0);
+  stageRing.position.copy(roomCenter3D);
   stageRing.receiveShadow = true;
   scene.add(stageRing);
 
   // ---- Audience floor (below stage by 1.14m) ----
+  const audienceFloorPos = worldToThree(state.ROOM_CENTER.x, state.ROOM_CENTER.y, state.audienceFloorZ);
   const floorGeo = new THREE.CircleGeometry(state.R_AUDIENCE, 64);
   const floorMat = new THREE.MeshStandardMaterial({
-    color: 0xcccccc,
+    color: 0x999999,
     roughness: 0.8,
     metalness: 0,
     side: THREE.DoubleSide,
   });
   const audienceFloor = new THREE.Mesh(floorGeo, floorMat);
   audienceFloor.rotation.x = -Math.PI / 2;
-  audienceFloor.position.set(0, 0, state.audienceFloorZ);
+  audienceFloor.position.copy(audienceFloorPos);
   audienceFloor.receiveShadow = true;
   scene.add(audienceFloor);
+
+  // ---- Step wall (vertical drop from stage to audience pit) ----
+  const wallHeight = 1.14;
+  const wallGeo = new THREE.CylinderGeometry(state.R_AUDIENCE, state.R_AUDIENCE, wallHeight, 64, 1, true);
+  const wallMat = new THREE.MeshStandardMaterial({
+    color: 0x888888,
+    roughness: 0.6,
+    metalness: 0.2,
+    side: THREE.DoubleSide,
+  });
+  const stepWall = new THREE.Mesh(wallGeo, wallMat);
+  const wallPos = worldToThree(state.ROOM_CENTER.x, state.ROOM_CENTER.y, -wallHeight/2);
+  stepWall.position.copy(wallPos);
+  stepWall.receiveShadow = true;
+  scene.add(stepWall);
 
   // ---- Generate seat positions (same logic as drawFP) ----
   function getSeatPositions() {
@@ -321,12 +340,10 @@ async function init3D() {
     const focalHeight = cam.aimZ;
     const fovDeg = (state.fov(cam.lens).v * 180 / Math.PI).toFixed(1);
 
-    // Find actors in view (project them and check if inside canvas)
-    // We'll just list all actors with distance, and note if they're in the frustum.
+    // Find actors in view
     const inView = [];
     const basis = state.camBasis(cam);
     const angles = state.fov(cam.lens);
-    // We need the canvas size for projection
     const rect = canvas3d.getBoundingClientRect();
     const w = rect.width, h = rect.height;
     if (w > 0 && h > 0) {
@@ -340,7 +357,6 @@ async function init3D() {
         }
       });
     } else {
-      // Fallback: just list all actors with distance
       state.items.forEach(it => {
         if (it.type !== 'actor') return;
         const dx = cam.x - it.x, dy = cam.y - it.y, dz = cam.z - it.z;
@@ -383,7 +399,6 @@ async function init3D() {
       if (!renderer.getContext().isContextLost()) {
         renderer.render(scene, camera);
       }
-      // Update HUD
       updateHUD(cam);
     } catch (err) {
       console.error('Render error:', err);
