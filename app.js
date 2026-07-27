@@ -325,7 +325,7 @@ function drawFP() {
   ctx.strokeStyle = "#4488ff";
   ctx.lineWidth = 2;
   ctx.fill();
-  ctx.stroke();
+
 
   // ---- Draw seats ----
   ctx.fillStyle = "#c9c9cf";
