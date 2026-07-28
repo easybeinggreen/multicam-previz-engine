@@ -178,7 +178,11 @@ async function init3D() {
   });
 
   // ---- Character model loading ----
-  const MODEL_URLS = { brian: './Brian_Upright.glb' };
+  // 👈 ADDED ELIZABETH URL
+  const MODEL_URLS = {
+    brian: './Brian_Upright.glb',
+    elizabeth: './Elizabeth_Upright.glb'
+  };
   const templateCache = new Map();
 
   async function loadCharacterTemplate(modelKey) {
@@ -270,7 +274,9 @@ async function init3D() {
         let actorGroup = actorMeshes.get(it.id);
         if (!actorGroup) {
           const modelKey = it.modelKey || 'brian';
-          const desiredHeight = it.h || 1.8;
+          // 👈 MODEL-SPECIFIC DEFAULT HEIGHT: Elizabeth = 1.7m, Brian = 1.8m
+          const defaultHeight = (modelKey === 'elizabeth') ? 1.7 : 1.8;
+          const desiredHeight = it.h || defaultHeight;
           const template = templateCache.get(modelKey) || null;
           actorGroup = makeActorMesh(template, desiredHeight);
           actorGroup.userData.actorId = it.id;
