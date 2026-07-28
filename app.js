@@ -68,15 +68,17 @@ Object.keys(CAMS).forEach(k => {
 });
 
 // Character presets
+// 👈 UPDATED: Female now uses "elizabeth"
 const CHARACTERS = {
   male: { label: "Male actor", height: 1.8, color: "#378ADD", modelKey: "brian" },
-  female: { label: "Female actor", height: 1.7, color: "#B565D8", modelKey: "brian" }
+  female: { label: "Female actor", height: 1.7, color: "#B565D8", modelKey: "elizabeth" }
 };
 
 // Initial items
+// 👈 UPDATED: Female actor now uses modelKey: "elizabeth"
 let items = [
   { id: 1, type: "actor", label: "Male actor", x: STAGE_MARKS.V3.x, y: STAGE_MARKS.V3.y, z: 0, w: 0.7, d: 0.4, h: 1.8, facing: 270, color: "#378ADD", standAt: "V3", character: "male", modelKey: "brian" },
-  { id: 2, type: "actor", label: "Female actor", x: STAGE_MARKS.V2.x, y: STAGE_MARKS.V2.y, z: 0, w: 0.65, d: 0.4, h: 1.7, facing: 302, color: "#B565D8", standAt: "V2", character: "female", modelKey: "brian" },
+  { id: 2, type: "actor", label: "Female actor", x: STAGE_MARKS.V2.x, y: STAGE_MARKS.V2.y, z: 0, w: 0.65, d: 0.4, h: 1.7, facing: 302, color: "#B565D8", standAt: "V2", character: "female", modelKey: "elizabeth" },
   { id: 3, type: "prop", label: "Table", x: STAGE_MARKS.V3.x + 2, y: STAGE_MARKS.V3.y, z: 0, w: 1.4, h: 0.9, color: "#FAC775" }
 ];
 
