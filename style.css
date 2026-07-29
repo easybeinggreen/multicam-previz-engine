@@ -291,3 +291,12 @@ canvas {
 @media (max-width: 700px) {
   .controls-grid { grid-template-columns: 1fr 1fr; }
 }
+
+.hud {
+  position: absolute;
+  bottom: 10px !important;
+  left: 10px !important;
+  top: auto !important;
+  right: auto !important;
+  transform: none !important;
+}
