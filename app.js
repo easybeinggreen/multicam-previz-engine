@@ -459,7 +459,7 @@ ctx.fill();
     const p = toPx(it.x, it.y);
     if (it.type === "actor") {
       const rx = Math.max((it.w / 2) * scale, 2), ry = Math.max((it.d / 2) * scale, 1.4);
-      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(-it.facing * D2R);
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(-it.facing * D2R - Math.PI / 2);
       ctx.fillStyle = it.color; ctx.beginPath(); ctx.ellipse(0, 0, rx, ry, 0, 0, 7); ctx.fill();
       ctx.strokeStyle = "#fff"; ctx.lineWidth = it.id === activeActor ? 2 : 0.5; ctx.stroke();
       // Arrow points forward (towards facing direction) – fixed
