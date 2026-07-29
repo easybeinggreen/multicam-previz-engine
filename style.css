@@ -300,3 +300,24 @@ canvas {
   right: auto !important;
   transform: none !important;
 }
+.vf-wrap {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+}
+#vf3d, #vf {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.viewers-row {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+.view-block .use3d-row {
+  display: block;
+  height: 17px;
+  margin-bottom: 2px;
+}
