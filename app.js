@@ -313,20 +313,21 @@ function drawFP() {
   const seatWidth = 0.45;
   const seatDepth = 0.6;
 
-  // ---- Draw stage cut‑out area (semi‑transparent blue) ----
-  const dyCut = cutY - centreY;
-  const chordX = Math.sqrt(radius * radius - dyCut * dyCut);
-  const angle1 = Math.atan2(dyCut, -chordX);
-  const angle2 = Math.atan2(dyCut, chordX);
-  // We want the arc that goes through the top (closest to stage) – that's the smaller segment.
-  ctx.beginPath();
-  ctx.moveTo(toPx(-chordX, cutY).x, toPx(-chordX, cutY).y);
-  ctx.arc(toPx(centreX, centreY).x, toPx(centreX, centreY).y, radius * scale, angle1, angle2, true);
-  ctx.closePath();
-  ctx.fillStyle = "rgba(100, 150, 255, 0.15)";
-  ctx.strokeStyle = "#4488ff";
-  ctx.lineWidth = 2;
-  ctx.fill();
+ // ---- Stage cut‑out area (removed) ----
+/*
+const dyCut = cutY - centreY;
+const chordX = Math.sqrt(radius * radius - dyCut * dyCut);
+const angle1 = Math.atan2(dyCut, -chordX);
+const angle2 = Math.atan2(dyCut, chordX);
+ctx.beginPath();
+ctx.moveTo(toPx(-chordX, cutY).x, toPx(-chordX, cutY).y);
+ctx.arc(toPx(centreX, centreY).x, toPx(centreX, centreY).y, radius * scale, angle1, angle2, true);
+ctx.closePath();
+ctx.fillStyle = "rgba(100, 150, 255, 0.15)";
+ctx.strokeStyle = "#4488ff";
+ctx.lineWidth = 2;
+ctx.fill();
+*/
 
 
   // ---- Draw seats ----
