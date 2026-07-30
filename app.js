@@ -3,9 +3,11 @@
 const SW = 24.6, SH = 13.8;         // Sony F5500 Super35 sensor mm
 const R_AUDIENCE = 14.5;            // seating/room boundary radius (m) — 95'2" diameter — CONFIRMED from source PDF
 
-// ⚠ PLACEHOLDER — real walkway width to be confirmed with Tony. 1.8m chosen as a realistic
-// performer/camera walkway clearance (typ. 1.2–2.4m for in-the-round staging).
-const WALKWAY_WIDTH_M = 1.8;
+// ⚠ PLACEHOLDER — real walkway width to be confirmed with Tony. 2.4m chosen as a safer
+// performer/camera walkway clearance (typ. 1.2–2.4m for in-the-round staging; the narrower
+// 1.8m first pass read as too tight once rendered — bumped up rather than shrinking the
+// audience circle, since that 95'2" figure is a confirmed, likely load-bearing number).
+const WALKWAY_WIDTH_M = 2.4;
 const R_WALL = R_AUDIENCE + WALKWAY_WIDTH_M;   // mouth radius (m) — where recesses start & touch each other
 
 // ⚠ PLACEHOLDER — recess depth. Per Paul: less critical than the walkway width, since the
