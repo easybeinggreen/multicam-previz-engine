@@ -42,7 +42,7 @@ async function init3D() {
   const roomCenter3D = worldToThree(state.ROOM_CENTER.x, state.ROOM_CENTER.y, 0);
 
   // ---- Stage floor (ring) – increased segments, rotated to hide seam ----
-  const stageRingGeo = new THREE.RingGeometry(state.R_AUDIENCE, state.R_VIGNETTE, 128);
+  const stageRingGeo = new THREE.RingGeometry(state.R_AUDIENCE, state.R_WALL, 128);
   const stageRingMat = new THREE.MeshStandardMaterial({
     color: 0xe0e0e0,
     roughness: 0.7,
@@ -150,32 +150,171 @@ async function init3D() {
   });
   scene.add(seatGroup);
 
-  // ---- Vignette panels ----
-  const vignetteColors = {
-    V1: 0xaaccff,
-    V2: 0xffdd99,
-    V3: 0x99dd99,
-    V4: 0xff99cc,
-    V5: 0xcc99ff
-  };
-  Object.entries(state.V).forEach(([name, ang]) => {
-    const rad = ang * state.D2R;
-    const center = state.pt(ang, state.R_VIGNETTE);
-    const geo = new THREE.PlaneGeometry(state.VIGNETTE_WIDTH_M, state.VIGNETTE_HEIGHT_M);
-    const color = vignetteColors[name] || 0xcdc4e8;
-    const mat = new THREE.MeshStandardMaterial({ 
-      color: color,
-      side: THREE.DoubleSide,
-      roughness: 0.6,
-      metalness: 0.1
-    });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.copy(worldToThree(center.x, center.y, state.VIGNETTE_HEIGHT_M / 2));
-    const outward = worldToThree(center.x + Math.cos(rad) * 5, center.y + Math.sin(rad) * 5, state.VIGNETTE_HEIGHT_M / 2);
-    mesh.lookAt(outward);
-    mesh.receiveShadow = true;
-    scene.add(mesh);
+  // ---- Vignette recesses: real 3D volumes ----
+  // Each vignette is a rectangular recess (side walls + back wall + floor) touching its neighbour
+  // only at the front (mouth) corner, with a wedge-shaped wall cap closing the gap behind that
+  // point. A separate flush panel sits above (10ft–20ft), level with the mouth, not recessed.
+
+  function quadGeometry(p1, p2, p3, p4) {
+    // p1..p4 wound around the quad perimeter (THREE.Vector3 in three.js world space)
+    const geo = new THREE.BufferGeometry();
+    const verts = new Float32Array([
+      p1.x, p1.y, p1.z, p2.x, p2.y, p2.z, p3.x, p3.y, p3.z,
+      p1.x, p1.y, p1.z, p3.x, p3.y, p3.z, p4.x, p4.y, p4.z
+    ]);
+    const uvs = new Float32Array([0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1]);
+    geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    geo.computeVertexNormals();
+    return geo;
+  }
+
+  const neutralWallMat = new THREE.MeshStandardMaterial({
+    color: 0xe8e4df, roughness: 0.75, metalness: 0.05, side: THREE.DoubleSide
   });
+  const recessFloorMat = new THREE.MeshStandardMaterial({
+    color: 0xd8d4cd, roughness: 0.8, metalness: 0.0, side: THREE.DoubleSide
+  });
+
+  // ---- Procedural backdrop textures — approximations of each vignette's distinct look, not
+  // reproductions of the actual set art (which we don't have at any usable resolution) ----
+  function makeCanvas() {
+    const c = document.createElement('canvas');
+    c.width = 1024; c.height = 512;
+    return c;
+  }
+
+  function textureV1(ctx, w, h) {
+    // Jagged rock / canyon linework
+    const grad = ctx.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, '#dfe3e6'); grad.addColorStop(1, '#aeb6bd');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = 'rgba(60,70,80,0.5)';
+    for (let i = 0; i < 26; i++) {
+      let y = Math.random() * h;
+      ctx.lineWidth = 1 + Math.random() * 2;
+      ctx.beginPath(); ctx.moveTo(0, y);
+      for (let x = 0; x <= w; x += w / 24) { y += (Math.random() - 0.5) * h * 0.12; ctx.lineTo(x, y); }
+      ctx.stroke();
+    }
+  }
+
+  function textureV2(ctx, w, h) {
+    // Organic branching / coral weave
+    ctx.fillStyle = '#f2efe9'; ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = 'rgba(90,90,90,0.55)';
+    function branch(x, y, angle, len, depth) {
+      if (depth <= 0 || len < 4) return;
+      const x2 = x + Math.cos(angle) * len, y2 = y + Math.sin(angle) * len;
+      ctx.lineWidth = Math.max(0.6, depth * 0.5);
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x2, y2); ctx.stroke();
+      const spread = 0.5 + Math.random() * 0.4;
+      branch(x2, y2, angle - spread, len * 0.72, depth - 1);
+      branch(x2, y2, angle + spread, len * 0.72, depth - 1);
+    }
+    for (let i = 0; i < 6; i++) branch((i + 0.5) * (w / 6), h, -Math.PI / 2 + (Math.random() - 0.5) * 0.6, h * 0.32, 7);
+  }
+
+  function textureV3(ctx, w, h) {
+    // Terraced mountain ridges
+    ctx.fillStyle = '#e6e2da'; ctx.fillRect(0, 0, w, h);
+    const bands = 6;
+    for (let b = 0; b < bands; b++) {
+      const baseY = h * (0.25 + b * (0.7 / bands));
+      ctx.beginPath(); ctx.moveTo(0, h);
+      let y = baseY;
+      for (let x = 0; x <= w; x += w / 40) { y += (Math.random() - 0.5) * 14; ctx.lineTo(x, y); }
+      ctx.lineTo(w, h); ctx.closePath();
+      const tone = 210 - b * 16;
+      ctx.fillStyle = `rgb(${tone},${tone - 4},${tone - 12})`;
+      ctx.fill();
+    }
+  }
+
+  function textureV4(ctx, w, h) {
+    // Angular staircase
+    ctx.fillStyle = '#eceeef'; ctx.fillRect(0, 0, w, h);
+    const steps = 10;
+    for (let i = 0; i < steps; i++) {
+      const x0 = (i / steps) * w;
+      const stepH = (i / steps) * h * 0.7;
+      const tone = 235 - i * 9;
+      ctx.fillStyle = `rgb(${tone},${tone},${tone + 2})`;
+      ctx.fillRect(x0, h - stepH, w / steps + 1, stepH);
+      ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+      ctx.strokeRect(x0, h - stepH, w / steps + 1, stepH);
+    }
+  }
+
+  function textureV5(ctx, w, h) {
+    // Elliptical "planet" swirl
+    ctx.fillStyle = '#efeaf3'; ctx.fillRect(0, 0, w, h);
+    const cx = w / 2, cy = h / 2;
+    ctx.strokeStyle = 'rgba(90,70,110,0.45)';
+    for (let r = 20; r < Math.max(w, h); r += 22) {
+      ctx.lineWidth = 1 + (r % 66 === 0 ? 1 : 0);
+      ctx.beginPath(); ctx.ellipse(cx, cy, r * 1.15, r * 0.55, 0, 0, Math.PI * 2); ctx.stroke();
+    }
+  }
+
+  const TEXTURE_FNS = { V1: textureV1, V2: textureV2, V3: textureV3, V4: textureV4, V5: textureV5 };
+  function makeVignetteTexture(name) {
+    const canvas = makeCanvas();
+    const ctx = canvas.getContext('2d');
+    (TEXTURE_FNS[name] || textureV1)(ctx, canvas.width, canvas.height);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }
+
+  const LOWER_H = state.VIGNETTE_LOWER_H, TOTAL_H = state.VIGNETTE_TOTAL_H;
+
+  state.VIGNETTE_ORDER.forEach(name => {
+    const fp = state.VIGNETTE_FOOTPRINTS[name];
+    const w3 = (p, z) => worldToThree(p.x, p.y, z);
+
+    const frontL0 = w3(fp.frontL, 0), frontR0 = w3(fp.frontR, 0);
+    const backL0 = w3(fp.backL, 0), backR0 = w3(fp.backR, 0);
+    const frontLh = w3(fp.frontL, LOWER_H), frontRh = w3(fp.frontR, LOWER_H);
+    const backLh = w3(fp.backL, LOWER_H), backRh = w3(fp.backR, LOWER_H);
+    const frontLtop = w3(fp.frontL, TOTAL_H), frontRtop = w3(fp.frontR, TOTAL_H);
+
+    // Back wall — unique texture per vignette
+    const backMat = new THREE.MeshStandardMaterial({
+      map: makeVignetteTexture(name), roughness: 0.85, metalness: 0.0, side: THREE.DoubleSide
+    });
+    const backWall = new THREE.Mesh(quadGeometry(backL0, backR0, backRh, backLh), backMat);
+    backWall.receiveShadow = true;
+    scene.add(backWall);
+
+    // Side walls
+    const sideL = new THREE.Mesh(quadGeometry(frontL0, backL0, backLh, frontLh), neutralWallMat);
+    const sideR = new THREE.Mesh(quadGeometry(backR0, frontR0, frontRh, backRh), neutralWallMat);
+    sideL.receiveShadow = true; sideR.receiveShadow = true;
+    scene.add(sideL); scene.add(sideR);
+
+    // Recess floor
+    const floor = new THREE.Mesh(quadGeometry(frontL0, frontR0, backR0, backL0), recessFloorMat);
+    floor.receiveShadow = true;
+    scene.add(floor);
+
+    // Upper flush panel (10ft–20ft) — sits at the mouth, not recessed
+    const upperPanel = new THREE.Mesh(quadGeometry(frontLh, frontRh, frontRtop, frontLtop), neutralWallMat);
+    upperPanel.receiveShadow = true;
+    scene.add(upperPanel);
+  });
+
+  // Wedge caps: close the solid-wall gap between neighbouring recesses' back walls
+  for (let i = 0; i < state.VIGNETTE_ORDER.length - 1; i++) {
+    const a = state.VIGNETTE_FOOTPRINTS[state.VIGNETTE_ORDER[i]];
+    const b = state.VIGNETTE_FOOTPRINTS[state.VIGNETTE_ORDER[i + 1]];
+    const w3 = (p, z) => worldToThree(p.x, p.y, z);
+    const p1 = w3(a.backR, 0), p2 = w3(b.backL, 0);
+    const p1h = w3(a.backR, LOWER_H), p2h = w3(b.backL, LOWER_H);
+    const wedge = new THREE.Mesh(quadGeometry(p1, p2, p2h, p1h), neutralWallMat);
+    wedge.receiveShadow = true;
+    scene.add(wedge);
+  }
 
   // ---- Character model loading ----
   // 👈 ADDED ELIZABETH URL
