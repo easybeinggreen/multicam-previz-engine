@@ -1,12 +1,25 @@
 // ===== Multicam Previz Engine =====
 // Core constants
 const SW = 24.6, SH = 13.8;         // Sony F5500 Super35 sensor mm
-const R_AUDIENCE = 14.5;            // seating/room boundary radius (m) — 95'2" diameter
-const R_VIGNETTE = 18.16;           // back-wall radius (m) — 14.5 + 12ft recess
-const VIGNETTE_WIDTH_M = 8.99;      // 29'6"
-const VIGNETTE_HEIGHT_M = 3.05;     // 10'0"
+const R_AUDIENCE = 14.5;            // seating/room boundary radius (m) — 95'2" diameter — CONFIRMED from source PDF
+
+// ⚠ PLACEHOLDER — real walkway width to be confirmed with Tony. 1.8m chosen as a realistic
+// performer/camera walkway clearance (typ. 1.2–2.4m for in-the-round staging).
+const WALKWAY_WIDTH_M = 1.8;
+const R_WALL = R_AUDIENCE + WALKWAY_WIDTH_M;   // mouth radius (m) — where recesses start & touch each other
+
+// ⚠ PLACEHOLDER — recess depth. Per Paul: less critical than the walkway width, since the
+// source PDF's 12'6" label conflates recess depth with walkway width and can't be trusted directly.
+const VIGNETTE_DEPTH_M = 3.0;
+const R_BACK = R_WALL + VIGNETTE_DEPTH_M;      // back-wall radius (m)
+
+// Two-tier height: bottom = actual recess (unique art per vignette), top = flush flat panel
+// sitting at R_WALL (not recessed), matching the source elevation sketch.
+const VIGNETTE_LOWER_H = 3.05;   // 10'0" — recessed zone
+const VIGNETTE_UPPER_H = 3.05;   // 10'0" — flush panel above
+const VIGNETTE_TOTAL_H = VIGNETTE_LOWER_H + VIGNETTE_UPPER_H; // 6.1m
+
 const D2R = Math.PI / 180;
-const VIGNETTE_HALF_WIDTH_DEG = Math.asin((VIGNETTE_WIDTH_M / 2) / R_VIGNETTE) * 180 / Math.PI;
 
 // Unit helper
 function toFeetInches(m) {
@@ -17,46 +30,82 @@ function toFeetInches(m) {
 }
 
 // pt(angle, radius) returns world point with origin at V3 base (0,0,0)
+// (offset is an arbitrary coordinate convention — shifting it doesn't move anything visually,
+// since ROOM_CENTER shifts by the same amount and all rendering is relative to it)
 function pt(angleDeg, radius) {
   const rad = angleDeg * D2R;
-  return { x: radius * Math.cos(rad), y: radius * Math.sin(rad) - R_VIGNETTE };
+  return { x: radius * Math.cos(rad), y: radius * Math.sin(rad) - R_WALL };
 }
-const ROOM_CENTER = { x: 0, y: -R_VIGNETTE };
+const ROOM_CENTER = { x: 0, y: -R_WALL };
 
 // Vignette centre angles
 const V = { V1: 155, V2: 122, V3: 90, V4: 57, V5: 24 };
+const VIGNETTE_ORDER = ['V1', 'V2', 'V3', 'V4', 'V5'];
 
-// Stage marks — 2m in front of the wall
+// Boundary angles between neighbouring vignettes (the angular midpoint = where mouths touch),
+// plus outer half-span for V1/V5's outer edge (~half the average inter-vignette spacing,
+// which lines up with the source README's ~171°/8° overall arc).
+const OUTER_HALF_SPAN_DEG = 16;
+const VIGNETTE_BOUNDS = {};
+{
+  const angles = VIGNETTE_ORDER.map(k => V[k]);
+  VIGNETTE_ORDER.forEach((name, i) => {
+    const leftEdge = i === 0 ? angles[i] + OUTER_HALF_SPAN_DEG : (angles[i] + angles[i - 1]) / 2;
+    const rightEdge = i === VIGNETTE_ORDER.length - 1 ? angles[i] - OUTER_HALF_SPAN_DEG : (angles[i] + angles[i + 1]) / 2;
+    VIGNETTE_BOUNDS[name] = [leftEdge, rightEdge];
+  });
+}
+
+// Rectangular recess footprint per vignette: mouth corners on the R_WALL circle (these are the
+// points that touch the neighbouring vignette's mouth corner), projected straight back along the
+// vignette's own centre-angle direction to the back wall. Adjacent recesses touch at frontR/frontL
+// but diverge behind that point, leaving the wedge of solid wall Paul described.
+function vignetteFootprint(name) {
+  const ang = V[name];
+  const [aL, aR] = VIGNETTE_BOUNDS[name];
+  const frontL = pt(aL, R_WALL);
+  const frontR = pt(aR, R_WALL);
+  const dir = { x: Math.cos(ang * D2R), y: Math.sin(ang * D2R) };
+  const backL = { x: frontL.x + dir.x * VIGNETTE_DEPTH_M, y: frontL.y + dir.y * VIGNETTE_DEPTH_M };
+  const backR = { x: frontR.x + dir.x * VIGNETTE_DEPTH_M, y: frontR.y + dir.y * VIGNETTE_DEPTH_M };
+  return { frontL, frontR, backL, backR, angle: ang };
+}
+const VIGNETTE_FOOTPRINTS = {};
+VIGNETTE_ORDER.forEach(k => { VIGNETTE_FOOTPRINTS[k] = vignetteFootprint(k); });
+
+const VIGNETTE_COLORS = { V1: '#aaccff', V2: '#ffdd99', V3: '#99dd99', V4: '#ff99cc', V5: '#cc99ff' };
+
+// Stage marks — mid-depth inside the recess (where a performer would actually stand)
 const STAGE_MARKS = {};
-Object.keys(V).forEach(k => { STAGE_MARKS[k] = pt(V[k], R_VIGNETTE - 2); });
+Object.keys(V).forEach(k => { STAGE_MARKS[k] = pt(V[k], R_WALL + VIGNETTE_DEPTH_M / 2); });
 
 // Targets
 const TARGETS = {
   "Room centre": () => ({ x: ROOM_CENTER.x, y: ROOM_CENTER.y }),
   "Origin (V3 base)": () => ({ x: 0, y: 0 }),
-  "Vignette1": () => pt(V.V1, R_VIGNETTE),
-  "Vignette2": () => pt(V.V2, R_VIGNETTE),
-  "Vignette3": () => pt(V.V3, R_VIGNETTE),
-  "Vignette4": () => pt(V.V4, R_VIGNETTE),
-  "Vignette5": () => pt(V.V5, R_VIGNETTE),
-  "Vignette1-2": () => pt((V.V1 + V.V2) / 2, R_VIGNETTE),
-  "Vignette4-5": () => pt((V.V4 + V.V5) / 2, R_VIGNETTE)
+  "Vignette1": () => STAGE_MARKS.V1,
+  "Vignette2": () => STAGE_MARKS.V2,
+  "Vignette3": () => STAGE_MARKS.V3,
+  "Vignette4": () => STAGE_MARKS.V4,
+  "Vignette5": () => STAGE_MARKS.V5,
+  "Vignette1-2": () => pt((V.V1 + V.V2) / 2, R_WALL + VIGNETTE_DEPTH_M / 2),
+  "Vignette4-5": () => pt((V.V4 + V.V5) / 2, R_WALL + VIGNETTE_DEPTH_M / 2)
 };
 
 // Camera table
 const CAMS = {
   "CAM1 Flung Rail": { type: "track", path: [pt(251, 14.6), pt(281, 14.6)], z: 1.0, lens: 35, aim: "Room centre", aimX: ROOM_CENTER.x, aimY: ROOM_CENTER.y, aimZ: 1.6 },
-  "CAM2 Long V1": { type: "fixed", x: pt(332, 17.7).x, y: pt(332, 17.7).y, z: 1.2, lens: 200, aim: "Vignette1", aimX: pt(V.V1, R_VIGNETTE).x, aimY: pt(V.V1, R_VIGNETTE).y, aimZ: 1.6 },
+  "CAM2 Long V1": { type: "fixed", x: pt(332, 17.7).x, y: pt(332, 17.7).y, z: 1.2, lens: 200, aim: "Vignette1", aimX: STAGE_MARKS.V1.x, aimY: STAGE_MARKS.V1.y, aimZ: 1.6 },
   "CAM3 Agito V1-2": { type: "track", path: [pt(316, 17.5), pt(328, 17.5)], z: 1.1, lens: 70, aim: "Vignette1-2", aimX: TARGETS["Vignette1-2"]().x, aimY: TARGETS["Vignette1-2"]().y, aimZ: 1.6 },
-  "CAM4 Long V2": { type: "fixed", x: pt(311, 17.4).x, y: pt(311, 17.4).y, z: 1.2, lens: 200, aim: "Vignette2", aimX: pt(V.V2, R_VIGNETTE).x, aimY: pt(V.V2, R_VIGNETTE).y, aimZ: 1.6 },
-  "CAM5 Long V3": { type: "fixed", x: pt(270.5, 20.4).x, y: pt(270.5, 20.4).y, z: 1.2, lens: 200, aim: "Vignette3", aimX: pt(V.V3, R_VIGNETTE).x, aimY: pt(V.V3, R_VIGNETTE).y, aimZ: 1.6 },
-  "CAM6 Wide V3": { type: "fixed", x: pt(266, 20.5).x, y: pt(266, 20.5).y, z: 1.2, lens: 60, aim: "Vignette3", aimX: pt(V.V3, R_VIGNETTE).x, aimY: pt(V.V3, R_VIGNETTE).y, aimZ: 1.6 },
-  "CAM7 Long V4": { type: "fixed", x: pt(233, 17.7).x, y: pt(233, 17.7).y, z: 1.2, lens: 200, aim: "Vignette4", aimX: pt(V.V4, R_VIGNETTE).x, aimY: pt(V.V4, R_VIGNETTE).y, aimZ: 1.6 },
+  "CAM4 Long V2": { type: "fixed", x: pt(311, 17.4).x, y: pt(311, 17.4).y, z: 1.2, lens: 200, aim: "Vignette2", aimX: STAGE_MARKS.V2.x, aimY: STAGE_MARKS.V2.y, aimZ: 1.6 },
+  "CAM5 Long V3": { type: "fixed", x: pt(270.5, 20.4).x, y: pt(270.5, 20.4).y, z: 1.2, lens: 200, aim: "Vignette3", aimX: STAGE_MARKS.V3.x, aimY: STAGE_MARKS.V3.y, aimZ: 1.6 },
+  "CAM6 Wide V3": { type: "fixed", x: pt(266, 20.5).x, y: pt(266, 20.5).y, z: 1.2, lens: 60, aim: "Vignette3", aimX: STAGE_MARKS.V3.x, aimY: STAGE_MARKS.V3.y, aimZ: 1.6 },
+  "CAM7 Long V4": { type: "fixed", x: pt(233, 17.7).x, y: pt(233, 17.7).y, z: 1.2, lens: 200, aim: "Vignette4", aimX: STAGE_MARKS.V4.x, aimY: STAGE_MARKS.V4.y, aimZ: 1.6 },
   "CAM8 Agito V4-5": { type: "track", path: [pt(215, 17.5), pt(227, 17.5)], z: 1.1, lens: 70, aim: "Vignette4-5", aimX: TARGETS["Vignette4-5"]().x, aimY: TARGETS["Vignette4-5"]().y, aimZ: 1.6 },
-  "CAM9 Long V5": { type: "fixed", x: pt(207, 18.2).x, y: pt(207, 18.2).y, z: 1.2, lens: 200, aim: "Vignette5", aimX: pt(V.V5, R_VIGNETTE).x, aimY: pt(V.V5, R_VIGNETTE).y, aimZ: 1.6 },
+  "CAM9 Long V5": { type: "fixed", x: pt(207, 18.2).x, y: pt(207, 18.2).y, z: 1.2, lens: 200, aim: "Vignette5", aimX: STAGE_MARKS.V5.x, aimY: STAGE_MARKS.V5.y, aimZ: 1.6 },
   "CAM10 Mag Track": { type: "track", path: [pt(48, 7.3), pt(58, 7.3)], z: 1.6, lens: 24, aim: "Room centre", aimX: ROOM_CENTER.x, aimY: ROOM_CENTER.y, aimZ: 1.6 },
   "CAM11 Steadicam": { type: "track", path: [pt(155, 14.2), pt(185, 14.2)], z: 1.6, lens: 24, aim: "Room centre", aimX: ROOM_CENTER.x, aimY: ROOM_CENTER.y, aimZ: 1.6 },
-  "CAM12 Ladder": { type: "fixed", x: 0, y: -R_VIGNETTE, z: 4.5, lens: 35, aim: "Origin (V3 base)", aimX: 0, aimY: 0, aimZ: 1.6 }
+  "CAM12 Ladder": { type: "fixed", x: 0, y: ROOM_CENTER.y, z: 4.5, lens: 35, aim: "Origin (V3 base)", aimX: 0, aimY: 0, aimZ: 1.6 }
 };
 Object.keys(CAMS).forEach(k => {
   const c = CAMS[k];
@@ -293,7 +342,7 @@ function drawFP() {
   window._fpT = { toPx, fromPx };
 
   // ---- Seating geometry ----
-  const centreX = 0, centreY = -R_VIGNETTE;
+  const centreX = 0, centreY = -R_WALL;
   const radius = R_AUDIENCE;
 
   // Walkway boundaries (in metres) – user provided: -21ft to -15ft and +15ft to +21ft
@@ -377,12 +426,12 @@ ctx.fill();
     y += seatDepth;
   }
 
-  // ---- Draw stage floor (ring from R_AUDIENCE to R_VIGNETTE) ----
+  // ---- Draw stage floor / walkway (ring from R_AUDIENCE to R_WALL) ----
   ctx.fillStyle = "#e8e4df";
   ctx.strokeStyle = "#d0ccc6";
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.arc(cx, cy, R_VIGNETTE * scale, 0, 7);
+  ctx.arc(cx, cy, R_WALL * scale, 0, 7);
   ctx.arc(cx, cy, R_AUDIENCE * scale, 0, 7, true);
   ctx.closePath();
   ctx.fill();
@@ -404,14 +453,36 @@ ctx.fill();
   ctx.arc(cx, cy, R_AUDIENCE * scale, 0, 7);
   ctx.stroke();
 
-  // ---- Vignette panels ----
-  Object.entries(V).forEach(([name, ang]) => {
-    const pts = [];
-    for (let d = -VIGNETTE_HALF_WIDTH_DEG; d <= VIGNETTE_HALF_WIDTH_DEG; d += 2) pts.push(toPx(...Object.values(pt(ang + d, R_VIGNETTE))));
-    ctx.strokeStyle = "#6C5CE7"; ctx.lineWidth = 6;
-    ctx.beginPath(); pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)); ctx.stroke();
-    const mid = toPx(...Object.values(pt(ang, R_VIGNETTE + 1.4)));
-    ctx.fillStyle = "#4b3fb0"; ctx.font = "bold 10px monospace"; ctx.textAlign = "center"; ctx.fillText(name, mid.x, mid.y);
+  // ---- Vignette recesses: wedge infill first (solid wall between recesses), then recess polygons ----
+  ctx.fillStyle = "#cfcac2";
+  ctx.strokeStyle = "#b5afa6";
+  ctx.lineWidth = 1;
+  for (let i = 0; i < VIGNETTE_ORDER.length - 1; i++) {
+    const a = VIGNETTE_FOOTPRINTS[VIGNETTE_ORDER[i]], b = VIGNETTE_FOOTPRINTS[VIGNETTE_ORDER[i + 1]];
+    const shared = toPx(a.frontR.x, a.frontR.y);
+    const backA = toPx(a.backR.x, a.backR.y);
+    const backB = toPx(b.backL.x, b.backL.y);
+    ctx.beginPath();
+    ctx.moveTo(shared.x, shared.y);
+    ctx.lineTo(backA.x, backA.y);
+    ctx.lineTo(backB.x, backB.y);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+  }
+
+  VIGNETTE_ORDER.forEach(name => {
+    const fp = VIGNETTE_FOOTPRINTS[name];
+    const pts = [fp.frontL, fp.frontR, fp.backR, fp.backL].map(p => toPx(p.x, p.y));
+    ctx.fillStyle = VIGNETTE_COLORS[name];
+    ctx.strokeStyle = "#6C5CE7"; ctx.lineWidth = 2;
+    ctx.beginPath();
+    pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+
+    const midBack = { x: (fp.backL.x + fp.backR.x) / 2, y: (fp.backL.y + fp.backR.y) / 2 };
+    const labelPos = toPx(midBack.x, midBack.y);
+    ctx.fillStyle = "#4b3fb0"; ctx.font = "bold 10px monospace"; ctx.textAlign = "center";
+    ctx.fillText(name, labelPos.x, labelPos.y);
   });
   ctx.lineWidth = 1;
 
@@ -513,23 +584,31 @@ function drawFloorGrid(ctx, c, basis, angles, w, h) {
   }
 }
 function drawVignettePanels(ctx, c, basis, angles, w, h) {
-  Object.entries(V).forEach(([name, ang]) => {
-    const rad = ang * D2R;
-    const center = pt(ang, R_VIGNETTE);
-    const tx = -Math.sin(rad), ty = Math.cos(rad);
-    const hw = VIGNETTE_WIDTH_M / 2, ht = VIGNETTE_HEIGHT_M;
-    const bl = { x: center.x - tx * hw, y: center.y - ty * hw };
-    const br = { x: center.x + tx * hw, y: center.y + ty * hw };
-    const pbl = project(c, basis, angles, w, h, bl.x, bl.y, 0);
-    const pbr = project(c, basis, angles, w, h, br.x, br.y, 0);
-    const ptl = project(c, basis, angles, w, h, bl.x, bl.y, ht);
-    const ptr = project(c, basis, angles, w, h, br.x, br.y, ht);
-    if (!pbl || !pbr || !ptl || !ptr) return;
+  VIGNETTE_ORDER.forEach(name => {
+    const fp = VIGNETTE_FOOTPRINTS[name];
+    const proj = (p, z) => project(c, basis, angles, w, h, p.x, p.y, z);
+
+    const backL0 = proj(fp.backL, 0), backR0 = proj(fp.backR, 0);
+    const backLh = proj(fp.backL, VIGNETTE_LOWER_H), backRh = proj(fp.backR, VIGNETTE_LOWER_H);
+    const frontL0 = proj(fp.frontL, 0), frontR0 = proj(fp.frontR, 0);
+    const frontLh = proj(fp.frontL, VIGNETTE_LOWER_H), frontRh = proj(fp.frontR, VIGNETTE_LOWER_H);
+    const frontLtop = proj(fp.frontL, VIGNETTE_TOTAL_H), frontRtop = proj(fp.frontR, VIGNETTE_TOTAL_H);
+    if (!backL0 || !backR0 || !backLh || !backRh || !frontL0 || !frontR0 || !frontLh || !frontRh) return;
+
     ctx.fillStyle = "rgba(108,92,231,0.18)"; ctx.strokeStyle = "rgba(108,92,231,0.55)";
-    ctx.beginPath(); ctx.moveTo(pbl.x, pbl.y); ctx.lineTo(pbr.x, pbr.y); ctx.lineTo(ptr.x, ptr.y); ctx.lineTo(ptl.x, ptl.y); ctx.closePath();
+    // Back wall
+    ctx.beginPath(); ctx.moveTo(backL0.x, backL0.y); ctx.lineTo(backR0.x, backR0.y); ctx.lineTo(backRh.x, backRh.y); ctx.lineTo(backLh.x, backLh.y); ctx.closePath();
     ctx.fill(); ctx.stroke();
+    // Side walls
+    ctx.beginPath(); ctx.moveTo(frontL0.x, frontL0.y); ctx.lineTo(backL0.x, backL0.y); ctx.lineTo(backLh.x, backLh.y); ctx.lineTo(frontLh.x, frontLh.y); ctx.closePath(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(frontR0.x, frontR0.y); ctx.lineTo(backR0.x, backR0.y); ctx.lineTo(backRh.x, backRh.y); ctx.lineTo(frontRh.x, frontRh.y); ctx.closePath(); ctx.stroke();
+    // Upper flush panel
+    if (frontLtop && frontRtop) {
+      ctx.beginPath(); ctx.moveTo(frontLh.x, frontLh.y); ctx.lineTo(frontRh.x, frontRh.y); ctx.lineTo(frontRtop.x, frontRtop.y); ctx.lineTo(frontLtop.x, frontLtop.y); ctx.closePath(); ctx.stroke();
+    }
+
     ctx.fillStyle = "#4b3fb0"; ctx.font = "10px monospace"; ctx.textAlign = "center";
-    ctx.fillText(name, (pbl.x + pbr.x) / 2, (ptl.y + pbl.y) / 2);
+    ctx.fillText(name, (backL0.x + backR0.x) / 2, (backLh.y + backL0.y) / 2);
   });
 }
 
@@ -718,10 +797,20 @@ window.addEventListener('resize', render);
 
 // ---------- State for 3D ----------
 window.PrevizState = {
-  CAMS, items, V, R_VIGNETTE, VIGNETTE_WIDTH_M, VIGNETTE_HEIGHT_M, D2R, pt, fov,
+  CAMS, items, V, VIGNETTE_ORDER, D2R, pt, fov,
   get active() { return active; },
-  // ---- Seating exports for 3D ----
+  // ---- Recess geometry exports for 3D ----
   R_AUDIENCE: R_AUDIENCE,
+  R_WALL: R_WALL,
+  R_BACK: R_BACK,
+  WALKWAY_WIDTH_M: WALKWAY_WIDTH_M,
+  VIGNETTE_DEPTH_M: VIGNETTE_DEPTH_M,
+  VIGNETTE_LOWER_H: VIGNETTE_LOWER_H,
+  VIGNETTE_UPPER_H: VIGNETTE_UPPER_H,
+  VIGNETTE_TOTAL_H: VIGNETTE_TOTAL_H,
+  VIGNETTE_BOUNDS: VIGNETTE_BOUNDS,
+  VIGNETTE_FOOTPRINTS: VIGNETTE_FOOTPRINTS,
+  VIGNETTE_COLORS: VIGNETTE_COLORS,
   ROOM_CENTER: ROOM_CENTER,
   leftWalkwayLeft: -6.401,
   leftWalkwayRight: -4.572,
