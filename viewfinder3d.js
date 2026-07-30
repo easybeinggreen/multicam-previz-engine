@@ -310,7 +310,6 @@ async function init3D() {
     const frontLh = w3(fp.frontL, LOWER_H), frontRh = w3(fp.frontR, LOWER_H);
     const backLh = w3(fp.backL, LOWER_H), backRh = w3(fp.backR, LOWER_H);
     const frontLtop = w3(fp.frontL, TOTAL_H), frontRtop = w3(fp.frontR, TOTAL_H);
-    const backLtop = w3(fp.backL, TOTAL_H), backRtop = w3(fp.backR, TOTAL_H);
 
     // Back wall — unique texture per vignette
     const backMat = new THREE.MeshStandardMaterial({
@@ -336,8 +335,11 @@ async function init3D() {
     upperPanel.receiveShadow = true;
     scene.add(upperPanel);
 
-    // Roof — closes the top of the box (was open, visible from above/wide angles)
-    const roof = new THREE.Mesh(quadGeometry(backLtop, backRtop, frontRtop, frontLtop), ceilingMat);
+    // Roof — closes the top of the actual recessed box (was wrongly capping the top of the
+    // WHOLE structure at TOTAL_H, leaving the recess itself open — you'd sightline straight
+    // through to the backside of the light-colored upper panel, which is why it stayed white
+    // no matter what material the roof had)
+    const roof = new THREE.Mesh(quadGeometry(backLh, backRh, frontRh, frontLh), ceilingMat);
     roof.receiveShadow = true;
     scene.add(roof);
   });
