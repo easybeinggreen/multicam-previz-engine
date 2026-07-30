@@ -82,9 +82,9 @@ VIGNETTE_ORDER.forEach(k => { VIGNETTE_FOOTPRINTS[k] = vignetteFootprint(k); });
 const VIGNETTE_COLORS = { V1: '#8fb4d9', V2: '#d9a75c', V3: '#7fbf8c', V4: '#e0a3bf', V5: '#b8a3e0' };
 const VIGNETTE_DARK_COLORS = { V1: '#223a5c', V2: '#5c3a17', V3: '#1f4a2e', V4: '#732f52', V5: '#453270' };
 
-// Stage marks — front-and-centre of the vignette, just a couple of steps in from the mouth
-// (not mid-recess). Independent of VIGNETTE_DEPTH_M on purpose.
-const STAGE_MARK_DEPTH_M = 1.0;
+// Stage marks — right at the threshold of the vignette (front-and-centre), not inside the
+// recess. Small 0.3m nudge in from the mouth line so the actor model doesn't clip on the wall.
+const STAGE_MARK_DEPTH_M = 0.3;
 const STAGE_MARKS = {};
 Object.keys(V).forEach(k => { STAGE_MARKS[k] = pt(V[k], R_WALL + STAGE_MARK_DEPTH_M); });
 
