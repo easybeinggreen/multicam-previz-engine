@@ -44,7 +44,7 @@ async function init3D() {
   // ---- Stage floor (ring) – increased segments, rotated to hide seam ----
   const stageRingGeo = new THREE.RingGeometry(state.R_AUDIENCE, state.R_WALL, 128);
   const stageRingMat = new THREE.MeshStandardMaterial({
-    color: 0xe0e0e0,
+    color: 0xb8b4ac,
     roughness: 0.7,
     metalness: 0.1,
     side: THREE.DoubleSide,
@@ -185,6 +185,24 @@ async function init3D() {
   const recessFloorMat = new THREE.MeshStandardMaterial({
     color: 0xd8d4cd, roughness: 0.8, metalness: 0.0, side: THREE.DoubleSide
   });
+  // Dedicated dark/matte material for roof + wedge-cap undersides — these were reusing the
+  // bright wall material, which read as an odd flat-lit slab from above/behind. A darker,
+  // shadow-toned ceiling recedes visually instead of popping forward.
+  const ceilingMat = new THREE.MeshStandardMaterial({
+    color: 0x3f3b34, roughness: 0.95, metalness: 0.0, side: THREE.DoubleSide
+  });
+
+  function hexToRgb(hex) {
+    const h = hex.replace('#', '');
+    return { r: parseInt(h.substr(0, 2), 16), g: parseInt(h.substr(2, 2), 16), b: parseInt(h.substr(4, 2), 16) };
+  }
+  function lerpColor(hexDark, hexLight, t) {
+    const a = hexToRgb(hexDark), b = hexToRgb(hexLight);
+    const r = Math.round(a.r + (b.r - a.r) * t);
+    const g = Math.round(a.g + (b.g - a.g) * t);
+    const bl = Math.round(a.b + (b.b - a.b) * t);
+    return `rgb(${r},${g},${bl})`;
+  }
 
   // ---- Procedural backdrop textures — approximations of each vignette's distinct look, not
   // reproductions of the actual set art (which we don't have at any usable resolution) ----
@@ -194,12 +212,12 @@ async function init3D() {
     return c;
   }
 
-  function textureV1(ctx, w, h) {
-    // Jagged rock / canyon linework — deep steel blue
+  function textureV1(ctx, w, h, dark, light) {
+    // Jagged rock / canyon linework
     const grad = ctx.createLinearGradient(0, 0, 0, h);
-    grad.addColorStop(0, '#4a6a94'); grad.addColorStop(1, '#1f3350');
+    grad.addColorStop(0, light); grad.addColorStop(1, dark);
     ctx.fillStyle = grad; ctx.fillRect(0, 0, w, h);
-    ctx.strokeStyle = 'rgba(220,235,255,0.35)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
     for (let i = 0; i < 26; i++) {
       let y = Math.random() * h;
       ctx.lineWidth = 1 + Math.random() * 2;
@@ -209,12 +227,12 @@ async function init3D() {
     }
   }
 
-  function textureV2(ctx, w, h) {
-    // Organic branching / coral weave — burnt amber
+  function textureV2(ctx, w, h, dark, light) {
+    // Organic branching / coral weave
     const grad = ctx.createLinearGradient(0, 0, 0, h);
-    grad.addColorStop(0, '#9a6a2e'); grad.addColorStop(1, '#5a3313');
+    grad.addColorStop(0, light); grad.addColorStop(1, dark);
     ctx.fillStyle = grad; ctx.fillRect(0, 0, w, h);
-    ctx.strokeStyle = 'rgba(255,235,200,0.55)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.45)';
     function branch(x, y, angle, len, depth) {
       if (depth <= 0 || len < 4) return;
       const x2 = x + Math.cos(angle) * len, y2 = y + Math.sin(angle) * len;
@@ -227,9 +245,9 @@ async function init3D() {
     for (let i = 0; i < 6; i++) branch((i + 0.5) * (w / 6), h, -Math.PI / 2 + (Math.random() - 0.5) * 0.6, h * 0.32, 7);
   }
 
-  function textureV3(ctx, w, h) {
-    // Terraced mountain ridges — deep forest green
-    ctx.fillStyle = '#16321f'; ctx.fillRect(0, 0, w, h);
+  function textureV3(ctx, w, h, dark, light) {
+    // Terraced mountain ridges — bands interpolate from dark (back) to light (front)
+    ctx.fillStyle = dark; ctx.fillRect(0, 0, w, h);
     const bands = 6;
     for (let b = 0; b < bands; b++) {
       const baseY = h * (0.25 + b * (0.7 / bands));
@@ -237,34 +255,32 @@ async function init3D() {
       let y = baseY;
       for (let x = 0; x <= w; x += w / 40) { y += (Math.random() - 0.5) * 14; ctx.lineTo(x, y); }
       ctx.lineTo(w, h); ctx.closePath();
-      const g = 90 + b * 14;
-      ctx.fillStyle = `rgb(${Math.round(g * 0.35)},${g},${Math.round(g * 0.45)})`;
+      ctx.fillStyle = lerpColor(dark, light, b / (bands - 1));
       ctx.fill();
     }
   }
 
-  function textureV4(ctx, w, h) {
-    // Angular staircase — deep berry/magenta
-    ctx.fillStyle = '#3a1226'; ctx.fillRect(0, 0, w, h);
+  function textureV4(ctx, w, h, dark, light) {
+    // Angular staircase — steps interpolate from dark (back) to light (front)
+    ctx.fillStyle = dark; ctx.fillRect(0, 0, w, h);
     const steps = 10;
     for (let i = 0; i < steps; i++) {
       const x0 = (i / steps) * w;
       const stepH = (i / steps) * h * 0.7;
-      const r = 100 + i * 12, g = 20 + i * 4, b = 60 + i * 8;
-      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillStyle = lerpColor(dark, light, i / (steps - 1));
       ctx.fillRect(x0, h - stepH, w / steps + 1, stepH);
-      ctx.strokeStyle = 'rgba(255,220,235,0.25)';
+      ctx.strokeStyle = 'rgba(255,255,255,0.25)';
       ctx.strokeRect(x0, h - stepH, w / steps + 1, stepH);
     }
   }
 
-  function textureV5(ctx, w, h) {
-    // Elliptical "planet" swirl — deep violet
+  function textureV5(ctx, w, h, dark, light) {
+    // Elliptical "planet" swirl
     const grad = ctx.createLinearGradient(0, 0, w, h);
-    grad.addColorStop(0, '#3a2159'); grad.addColorStop(1, '#1c1030');
+    grad.addColorStop(0, light); grad.addColorStop(1, dark);
     ctx.fillStyle = grad; ctx.fillRect(0, 0, w, h);
     const cx = w / 2, cy = h / 2;
-    ctx.strokeStyle = 'rgba(230,210,255,0.4)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
     for (let r = 20; r < Math.max(w, h); r += 22) {
       ctx.lineWidth = 1 + (r % 66 === 0 ? 1 : 0);
       ctx.beginPath(); ctx.ellipse(cx, cy, r * 1.15, r * 0.55, 0, 0, Math.PI * 2); ctx.stroke();
@@ -275,7 +291,9 @@ async function init3D() {
   function makeVignetteTexture(name) {
     const canvas = makeCanvas();
     const ctx = canvas.getContext('2d');
-    (TEXTURE_FNS[name] || textureV1)(ctx, canvas.width, canvas.height);
+    const dark = state.VIGNETTE_DARK_COLORS[name] || '#333333';
+    const light = state.VIGNETTE_COLORS[name] || '#cccccc';
+    (TEXTURE_FNS[name] || textureV1)(ctx, canvas.width, canvas.height, dark, light);
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
     return tex;
@@ -319,7 +337,7 @@ async function init3D() {
     scene.add(upperPanel);
 
     // Roof — closes the top of the box (was open, visible from above/wide angles)
-    const roof = new THREE.Mesh(quadGeometry(backLtop, backRtop, frontRtop, frontLtop), neutralWallMat);
+    const roof = new THREE.Mesh(quadGeometry(backLtop, backRtop, frontRtop, frontLtop), ceilingMat);
     roof.receiveShadow = true;
     scene.add(roof);
   });
@@ -337,7 +355,7 @@ async function init3D() {
     scene.add(wedge);
     // Wedge roof (closes the top of the gap — above LOWER_H the upper flush panels
     // already join seamlessly, so only this lower triangular volume needs capping)
-    const wedgeRoof = new THREE.Mesh(triGeometry(p1h, p2h, shared), neutralWallMat);
+    const wedgeRoof = new THREE.Mesh(triGeometry(p1h, p2h, shared), ceilingMat);
     wedgeRoof.receiveShadow = true;
     scene.add(wedgeRoof);
   }
@@ -469,7 +487,7 @@ async function init3D() {
       } else {
         let m = propMeshes.get(it.id);
         if (!m) {
-          const geo = new THREE.BoxGeometry(it.w, it.h, it.w * 0.7);
+          const geo = new THREE.BoxGeometry(it.w, it.h, it.d || it.w);
           const mat = new THREE.MeshStandardMaterial({ color: it.color, roughness: 0.7 });
           m = new THREE.Mesh(geo, mat);
           m.castShadow = true;
