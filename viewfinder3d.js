@@ -169,6 +169,16 @@ async function init3D() {
     return geo;
   }
 
+  function triGeometry(p1, p2, p3) {
+    const geo = new THREE.BufferGeometry();
+    const verts = new Float32Array([p1.x, p1.y, p1.z, p2.x, p2.y, p2.z, p3.x, p3.y, p3.z]);
+    const uvs = new Float32Array([0, 0, 1, 0, 0.5, 1]);
+    geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    geo.computeVertexNormals();
+    return geo;
+  }
+
   const neutralWallMat = new THREE.MeshStandardMaterial({
     color: 0xe8e4df, roughness: 0.75, metalness: 0.05, side: THREE.DoubleSide
   });
@@ -185,11 +195,11 @@ async function init3D() {
   }
 
   function textureV1(ctx, w, h) {
-    // Jagged rock / canyon linework
+    // Jagged rock / canyon linework — deep steel blue
     const grad = ctx.createLinearGradient(0, 0, 0, h);
-    grad.addColorStop(0, '#dfe3e6'); grad.addColorStop(1, '#aeb6bd');
+    grad.addColorStop(0, '#4a6a94'); grad.addColorStop(1, '#1f3350');
     ctx.fillStyle = grad; ctx.fillRect(0, 0, w, h);
-    ctx.strokeStyle = 'rgba(60,70,80,0.5)';
+    ctx.strokeStyle = 'rgba(220,235,255,0.35)';
     for (let i = 0; i < 26; i++) {
       let y = Math.random() * h;
       ctx.lineWidth = 1 + Math.random() * 2;
@@ -200,9 +210,11 @@ async function init3D() {
   }
 
   function textureV2(ctx, w, h) {
-    // Organic branching / coral weave
-    ctx.fillStyle = '#f2efe9'; ctx.fillRect(0, 0, w, h);
-    ctx.strokeStyle = 'rgba(90,90,90,0.55)';
+    // Organic branching / coral weave — burnt amber
+    const grad = ctx.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, '#9a6a2e'); grad.addColorStop(1, '#5a3313');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = 'rgba(255,235,200,0.55)';
     function branch(x, y, angle, len, depth) {
       if (depth <= 0 || len < 4) return;
       const x2 = x + Math.cos(angle) * len, y2 = y + Math.sin(angle) * len;
@@ -216,8 +228,8 @@ async function init3D() {
   }
 
   function textureV3(ctx, w, h) {
-    // Terraced mountain ridges
-    ctx.fillStyle = '#e6e2da'; ctx.fillRect(0, 0, w, h);
+    // Terraced mountain ridges — deep forest green
+    ctx.fillStyle = '#16321f'; ctx.fillRect(0, 0, w, h);
     const bands = 6;
     for (let b = 0; b < bands; b++) {
       const baseY = h * (0.25 + b * (0.7 / bands));
@@ -225,32 +237,34 @@ async function init3D() {
       let y = baseY;
       for (let x = 0; x <= w; x += w / 40) { y += (Math.random() - 0.5) * 14; ctx.lineTo(x, y); }
       ctx.lineTo(w, h); ctx.closePath();
-      const tone = 210 - b * 16;
-      ctx.fillStyle = `rgb(${tone},${tone - 4},${tone - 12})`;
+      const g = 90 + b * 14;
+      ctx.fillStyle = `rgb(${Math.round(g * 0.35)},${g},${Math.round(g * 0.45)})`;
       ctx.fill();
     }
   }
 
   function textureV4(ctx, w, h) {
-    // Angular staircase
-    ctx.fillStyle = '#eceeef'; ctx.fillRect(0, 0, w, h);
+    // Angular staircase — deep berry/magenta
+    ctx.fillStyle = '#3a1226'; ctx.fillRect(0, 0, w, h);
     const steps = 10;
     for (let i = 0; i < steps; i++) {
       const x0 = (i / steps) * w;
       const stepH = (i / steps) * h * 0.7;
-      const tone = 235 - i * 9;
-      ctx.fillStyle = `rgb(${tone},${tone},${tone + 2})`;
+      const r = 100 + i * 12, g = 20 + i * 4, b = 60 + i * 8;
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
       ctx.fillRect(x0, h - stepH, w / steps + 1, stepH);
-      ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+      ctx.strokeStyle = 'rgba(255,220,235,0.25)';
       ctx.strokeRect(x0, h - stepH, w / steps + 1, stepH);
     }
   }
 
   function textureV5(ctx, w, h) {
-    // Elliptical "planet" swirl
-    ctx.fillStyle = '#efeaf3'; ctx.fillRect(0, 0, w, h);
+    // Elliptical "planet" swirl — deep violet
+    const grad = ctx.createLinearGradient(0, 0, w, h);
+    grad.addColorStop(0, '#3a2159'); grad.addColorStop(1, '#1c1030');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, w, h);
     const cx = w / 2, cy = h / 2;
-    ctx.strokeStyle = 'rgba(90,70,110,0.45)';
+    ctx.strokeStyle = 'rgba(230,210,255,0.4)';
     for (let r = 20; r < Math.max(w, h); r += 22) {
       ctx.lineWidth = 1 + (r % 66 === 0 ? 1 : 0);
       ctx.beginPath(); ctx.ellipse(cx, cy, r * 1.15, r * 0.55, 0, 0, Math.PI * 2); ctx.stroke();
@@ -278,6 +292,7 @@ async function init3D() {
     const frontLh = w3(fp.frontL, LOWER_H), frontRh = w3(fp.frontR, LOWER_H);
     const backLh = w3(fp.backL, LOWER_H), backRh = w3(fp.backR, LOWER_H);
     const frontLtop = w3(fp.frontL, TOTAL_H), frontRtop = w3(fp.frontR, TOTAL_H);
+    const backLtop = w3(fp.backL, TOTAL_H), backRtop = w3(fp.backR, TOTAL_H);
 
     // Back wall — unique texture per vignette
     const backMat = new THREE.MeshStandardMaterial({
@@ -302,6 +317,11 @@ async function init3D() {
     const upperPanel = new THREE.Mesh(quadGeometry(frontLh, frontRh, frontRtop, frontLtop), neutralWallMat);
     upperPanel.receiveShadow = true;
     scene.add(upperPanel);
+
+    // Roof — closes the top of the box (was open, visible from above/wide angles)
+    const roof = new THREE.Mesh(quadGeometry(backLtop, backRtop, frontRtop, frontLtop), neutralWallMat);
+    roof.receiveShadow = true;
+    scene.add(roof);
   });
 
   // Wedge caps: close the solid-wall gap between neighbouring recesses' back walls
@@ -311,9 +331,15 @@ async function init3D() {
     const w3 = (p, z) => worldToThree(p.x, p.y, z);
     const p1 = w3(a.backR, 0), p2 = w3(b.backL, 0);
     const p1h = w3(a.backR, LOWER_H), p2h = w3(b.backL, LOWER_H);
+    const shared = w3(a.frontR, LOWER_H); // == b.frontL, the touching corner
     const wedge = new THREE.Mesh(quadGeometry(p1, p2, p2h, p1h), neutralWallMat);
     wedge.receiveShadow = true;
     scene.add(wedge);
+    // Wedge roof (closes the top of the gap — above LOWER_H the upper flush panels
+    // already join seamlessly, so only this lower triangular volume needs capping)
+    const wedgeRoof = new THREE.Mesh(triGeometry(p1h, p2h, shared), neutralWallMat);
+    wedgeRoof.receiveShadow = true;
+    scene.add(wedgeRoof);
   }
 
   // ---- Character model loading ----
@@ -343,10 +369,10 @@ async function init3D() {
       root.traverse((child) => {
         if (child.isMesh) {
           child.material = new THREE.MeshStandardMaterial({
-            color: 0xfafafa,
-            roughness: 0.9,
+            color: 0xffffff,
+            roughness: 0.55,
             metalness: 0.0,
-            emissive: new THREE.Color(0x000000),
+            emissive: new THREE.Color(0x151515),
           });
           child.castShadow = true;
           child.receiveShadow = true;
