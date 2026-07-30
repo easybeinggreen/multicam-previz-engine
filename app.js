@@ -1,826 +1,572 @@
-// ===== Multicam Previz Engine =====
-// Core constants
-const SW = 24.6, SH = 13.8;         // Sony F5500 Super35 sensor mm
-const R_AUDIENCE = 14.5;            // seating/room boundary radius (m) — 95'2" diameter — CONFIRMED from source PDF
+// ===== Final 3D viewer with audience, stage, and compact HUD =====
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-// ⚠ PLACEHOLDER — real walkway width to be confirmed with Tony. 2.4m chosen as a safer
-// performer/camera walkway clearance (typ. 1.2–2.4m for in-the-round staging; the narrower
-// 1.8m first pass read as too tight once rendered — bumped up rather than shrinking the
-// audience circle, since that 95'2" figure is a confirmed, likely load-bearing number).
-const WALKWAY_WIDTH_M = 2.4;
-const R_WALL = R_AUDIENCE + WALKWAY_WIDTH_M;   // mouth radius (m) — where recesses start & touch each other
+function worldToThree(x, y, z) { return new THREE.Vector3(x, z, -y); }
 
-// ⚠ PLACEHOLDER — recess depth. Per Paul: less critical than the walkway width, since the
-// source PDF's 12'6" label conflates recess depth with walkway width and can't be trusted directly.
-const VIGNETTE_DEPTH_M = 3.0;
-const R_BACK = R_WALL + VIGNETTE_DEPTH_M;      // back-wall radius (m)
+async function init3D() {
+  const canvas3d = document.getElementById('vf3d');
+  const toggle = document.getElementById('use3d');
+  const canvas2d = document.getElementById('vf');
+  if (!canvas3d || !toggle) return;
 
-// Two-tier height: bottom = actual recess (unique art per vignette), top = flush flat panel
-// sitting at R_WALL (not recessed), matching the source elevation sketch.
-const VIGNETTE_LOWER_H = 3.05;   // 10'0" — recessed zone
-const VIGNETTE_UPPER_H = 3.05;   // 10'0" — flush panel above
-const VIGNETTE_TOTAL_H = VIGNETTE_LOWER_H + VIGNETTE_UPPER_H; // 6.1m
+  const renderer = new THREE.WebGLRenderer({ canvas: canvas3d, antialias: true });
+  renderer.shadowMap.enabled = true;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.2;
 
-const D2R = Math.PI / 180;
+  const state = window.PrevizState;
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xf5f0eb);
 
-// Unit helper
-function toFeetInches(m) {
-  const ft = m * 3.28084;
-  const feet = Math.floor(ft);
-  const inches = Math.round((ft - feet) * 12);
-  return `${m.toFixed(2)}m (${feet}'${inches}")`;
-}
+  const camera = new THREE.PerspectiveCamera(50, 16 / 9, 0.1, 200);
 
-// pt(angle, radius) returns world point with origin at V3 base (0,0,0)
-// (offset is an arbitrary coordinate convention — shifting it doesn't move anything visually,
-// since ROOM_CENTER shifts by the same amount and all rendering is relative to it)
-function pt(angleDeg, radius) {
-  const rad = angleDeg * D2R;
-  return { x: radius * Math.cos(rad), y: radius * Math.sin(rad) - R_WALL };
-}
-const ROOM_CENTER = { x: 0, y: -R_WALL };
+  // ---- Lighting ----
+  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+  const mainLight = new THREE.DirectionalLight(0xffeedd, 1.5);
+  mainLight.position.set(10, 15, 10);
+  mainLight.castShadow = true;
+  mainLight.shadow.mapSize.set(2048, 2048);
+  mainLight.shadow.camera.left = -20;
+  mainLight.shadow.camera.right = 20;
+  mainLight.shadow.camera.top = 20;
+  mainLight.shadow.camera.bottom = -20;
+  scene.add(mainLight);
+  const fillLight = new THREE.DirectionalLight(0x8888ff, 0.3);
+  fillLight.position.set(-10, 5, -10);
+  scene.add(fillLight);
+  const rimLight = new THREE.DirectionalLight(0xffffff, 0.2);
+  rimLight.position.set(0, 10, -20);
+  scene.add(rimLight);
 
-// Vignette centre angles
-const V = { V1: 155, V2: 122, V3: 90, V4: 57, V5: 24 };
-const VIGNETTE_ORDER = ['V1', 'V2', 'V3', 'V4', 'V5'];
+  const roomCenter3D = worldToThree(state.ROOM_CENTER.x, state.ROOM_CENTER.y, 0);
 
-// Boundary angles between neighbouring vignettes (the angular midpoint = where mouths touch),
-// plus outer half-span for V1/V5's outer edge (~half the average inter-vignette spacing,
-// which lines up with the source README's ~171°/8° overall arc).
-const OUTER_HALF_SPAN_DEG = 16;
-const VIGNETTE_BOUNDS = {};
-{
-  const angles = VIGNETTE_ORDER.map(k => V[k]);
-  VIGNETTE_ORDER.forEach((name, i) => {
-    const leftEdge = i === 0 ? angles[i] + OUTER_HALF_SPAN_DEG : (angles[i] + angles[i - 1]) / 2;
-    const rightEdge = i === VIGNETTE_ORDER.length - 1 ? angles[i] - OUTER_HALF_SPAN_DEG : (angles[i] + angles[i + 1]) / 2;
-    VIGNETTE_BOUNDS[name] = [leftEdge, rightEdge];
+  // ---- Stage floor (ring) – increased segments, rotated to hide seam ----
+  const stageRingGeo = new THREE.RingGeometry(state.R_AUDIENCE, state.R_WALL, 128);
+  const stageRingMat = new THREE.MeshStandardMaterial({
+    color: 0xe0e0e0,
+    roughness: 0.7,
+    metalness: 0.1,
+    side: THREE.DoubleSide,
   });
-}
+  const stageRing = new THREE.Mesh(stageRingGeo, stageRingMat);
+  stageRing.rotation.x = -Math.PI / 2;
+  stageRing.rotation.z = Math.PI / 128; // slight rotation to hide seam
+  stageRing.position.copy(roomCenter3D);
+  stageRing.receiveShadow = true;
+  scene.add(stageRing);
 
-// Rectangular recess footprint per vignette: mouth corners on the R_WALL circle (these are the
-// points that touch the neighbouring vignette's mouth corner), projected straight back along the
-// vignette's own centre-angle direction to the back wall. Adjacent recesses touch at frontR/frontL
-// but diverge behind that point, leaving the wedge of solid wall Paul described.
-function vignetteFootprint(name) {
-  const ang = V[name];
-  const [aL, aR] = VIGNETTE_BOUNDS[name];
-  const frontL = pt(aL, R_WALL);
-  const frontR = pt(aR, R_WALL);
-  const dir = { x: Math.cos(ang * D2R), y: Math.sin(ang * D2R) };
-  const backL = { x: frontL.x + dir.x * VIGNETTE_DEPTH_M, y: frontL.y + dir.y * VIGNETTE_DEPTH_M };
-  const backR = { x: frontR.x + dir.x * VIGNETTE_DEPTH_M, y: frontR.y + dir.y * VIGNETTE_DEPTH_M };
-  return { frontL, frontR, backL, backR, angle: ang };
-}
-const VIGNETTE_FOOTPRINTS = {};
-VIGNETTE_ORDER.forEach(k => { VIGNETTE_FOOTPRINTS[k] = vignetteFootprint(k); });
-
-const VIGNETTE_COLORS = { V1: '#aaccff', V2: '#ffdd99', V3: '#99dd99', V4: '#ff99cc', V5: '#cc99ff' };
-
-// Stage marks — mid-depth inside the recess (where a performer would actually stand)
-const STAGE_MARKS = {};
-Object.keys(V).forEach(k => { STAGE_MARKS[k] = pt(V[k], R_WALL + VIGNETTE_DEPTH_M / 2); });
-
-// Targets
-const TARGETS = {
-  "Room centre": () => ({ x: ROOM_CENTER.x, y: ROOM_CENTER.y }),
-  "Origin (V3 base)": () => ({ x: 0, y: 0 }),
-  "Vignette1": () => STAGE_MARKS.V1,
-  "Vignette2": () => STAGE_MARKS.V2,
-  "Vignette3": () => STAGE_MARKS.V3,
-  "Vignette4": () => STAGE_MARKS.V4,
-  "Vignette5": () => STAGE_MARKS.V5,
-  "Vignette1-2": () => pt((V.V1 + V.V2) / 2, R_WALL + VIGNETTE_DEPTH_M / 2),
-  "Vignette4-5": () => pt((V.V4 + V.V5) / 2, R_WALL + VIGNETTE_DEPTH_M / 2)
-};
-
-// Camera table
-const CAMS = {
-  "CAM1 Flung Rail": { type: "track", path: [pt(251, 14.6), pt(281, 14.6)], z: 1.0, lens: 35, aim: "Room centre", aimX: ROOM_CENTER.x, aimY: ROOM_CENTER.y, aimZ: 1.6 },
-  "CAM2 Long V1": { type: "fixed", x: pt(332, 17.7).x, y: pt(332, 17.7).y, z: 1.2, lens: 200, aim: "Vignette1", aimX: STAGE_MARKS.V1.x, aimY: STAGE_MARKS.V1.y, aimZ: 1.6 },
-  "CAM3 Agito V1-2": { type: "track", path: [pt(316, 17.5), pt(328, 17.5)], z: 1.1, lens: 70, aim: "Vignette1-2", aimX: TARGETS["Vignette1-2"]().x, aimY: TARGETS["Vignette1-2"]().y, aimZ: 1.6 },
-  "CAM4 Long V2": { type: "fixed", x: pt(311, 17.4).x, y: pt(311, 17.4).y, z: 1.2, lens: 200, aim: "Vignette2", aimX: STAGE_MARKS.V2.x, aimY: STAGE_MARKS.V2.y, aimZ: 1.6 },
-  "CAM5 Long V3": { type: "fixed", x: pt(270.5, 20.4).x, y: pt(270.5, 20.4).y, z: 1.2, lens: 200, aim: "Vignette3", aimX: STAGE_MARKS.V3.x, aimY: STAGE_MARKS.V3.y, aimZ: 1.6 },
-  "CAM6 Wide V3": { type: "fixed", x: pt(266, 20.5).x, y: pt(266, 20.5).y, z: 1.2, lens: 60, aim: "Vignette3", aimX: STAGE_MARKS.V3.x, aimY: STAGE_MARKS.V3.y, aimZ: 1.6 },
-  "CAM7 Long V4": { type: "fixed", x: pt(233, 17.7).x, y: pt(233, 17.7).y, z: 1.2, lens: 200, aim: "Vignette4", aimX: STAGE_MARKS.V4.x, aimY: STAGE_MARKS.V4.y, aimZ: 1.6 },
-  "CAM8 Agito V4-5": { type: "track", path: [pt(215, 17.5), pt(227, 17.5)], z: 1.1, lens: 70, aim: "Vignette4-5", aimX: TARGETS["Vignette4-5"]().x, aimY: TARGETS["Vignette4-5"]().y, aimZ: 1.6 },
-  "CAM9 Long V5": { type: "fixed", x: pt(207, 18.2).x, y: pt(207, 18.2).y, z: 1.2, lens: 200, aim: "Vignette5", aimX: STAGE_MARKS.V5.x, aimY: STAGE_MARKS.V5.y, aimZ: 1.6 },
-  "CAM10 Mag Track": { type: "track", path: [pt(48, 7.3), pt(58, 7.3)], z: 1.6, lens: 24, aim: "Room centre", aimX: ROOM_CENTER.x, aimY: ROOM_CENTER.y, aimZ: 1.6 },
-  "CAM11 Steadicam": { type: "track", path: [pt(155, 14.2), pt(185, 14.2)], z: 1.6, lens: 24, aim: "Room centre", aimX: ROOM_CENTER.x, aimY: ROOM_CENTER.y, aimZ: 1.6 },
-  "CAM12 Ladder": { type: "fixed", x: 0, y: ROOM_CENTER.y, z: 4.5, lens: 35, aim: "Origin (V3 base)", aimX: 0, aimY: 0, aimZ: 1.6 }
-};
-Object.keys(CAMS).forEach(k => {
-  const c = CAMS[k];
-  if (c.type === "track") {
-    c.trackPos = 0.5;
-    c.x = c.path[0].x + (c.path[1].x - c.path[0].x) * 0.5;
-    c.y = c.path[0].y + (c.path[1].y - c.path[0].y) * 0.5;
-  }
-});
-
-// Character presets
-// 👈 UPDATED: Female now uses "elizabeth"
-const CHARACTERS = {
-  male: { label: "Male actor", height: 1.8, color: "#378ADD", modelKey: "brian" },
-  female: { label: "Female actor", height: 1.7, color: "#B565D8", modelKey: "elizabeth" }
-};
-
-// Initial items
-// 👈 UPDATED: Female actor now uses modelKey: "elizabeth"
-let items = [
-  { id: 1, type: "actor", label: "Male actor", x: STAGE_MARKS.V3.x, y: STAGE_MARKS.V3.y, z: 0, w: 0.7, d: 0.4, h: 1.8, facing: 270, color: "#378ADD", standAt: "V3", character: "male", modelKey: "brian" },
-  { id: 2, type: "actor", label: "Female actor", x: STAGE_MARKS.V2.x, y: STAGE_MARKS.V2.y, z: 0, w: 0.65, d: 0.4, h: 1.7, facing: 212, color: "#B565D8", standAt: "V2", character: "female", modelKey: "elizabeth" },
-  { id: 3, type: "prop", label: "Table", x: STAGE_MARKS.V3.x + 2, y: STAGE_MARKS.V3.y, z: 0, w: 1.4, h: 0.9, color: "#FAC775" }
-];
-
-let active = Object.keys(CAMS)[0], activeActor = items[0].id, dragging = null, draggingAim = false, panning = false, panStart = null;
-let viewZoom = 1, viewPanX = 0, viewPanY = 0;
-
-// ---------- UI wiring ----------
-const sel = document.getElementById('cs');
-Object.keys(CAMS).forEach(k => { const o = document.createElement('option'); o.value = k; o.innerText = k; sel.appendChild(o); });
-sel.onchange = e => { active = e.target.value; syncControls(); render(); };
-
-const aimSel = document.getElementById('aimpreset');
-const customOpt = document.createElement('option'); customOpt.value = "Custom"; customOpt.innerText = "Custom (dragged)"; customOpt.disabled = true; aimSel.appendChild(customOpt);
-Object.keys(TARGETS).forEach(k => { const o = document.createElement('option'); o.value = k; o.innerText = k; aimSel.appendChild(o); });
-aimSel.onchange = e => { const c = CAMS[active]; const t = TARGETS[e.target.value](); c.aim = e.target.value; c.aimX = t.x; c.aimY = t.y; render(); };
-
-const slider = document.getElementById('fs');
-slider.oninput = e => { CAMS[active].lens = +e.target.value; document.getElementById('fv').innerText = e.target.value + "mm"; render(); };
-
-const azSlider = document.getElementById('azs');
-azSlider.oninput = e => { CAMS[active].aimZ = +e.target.value; document.getElementById('az').innerText = toFeetInches(+e.target.value); render(); };
-
-const chzSlider = document.getElementById('chzs');
-chzSlider.max = 12;
-chzSlider.oninput = e => { CAMS[active].z = +e.target.value; document.getElementById('chz').innerText = toFeetInches(+e.target.value); render(); };
-
-const tpSlider = document.getElementById('tps');
-tpSlider.oninput = e => {
-  const c = CAMS[active];
-  c.trackPos = +e.target.value;
-  c.x = c.path[0].x + (c.path[1].x - c.path[0].x) * c.trackPos;
-  c.y = c.path[0].y + (c.path[1].y - c.path[0].y) * c.trackPos;
-  document.getElementById('tpv').innerText = Math.round(c.trackPos * 100) + "%";
-  render();
-};
-
-const standSel = document.getElementById('standat');
-Object.keys(STAGE_MARKS).forEach(k => { const o = document.createElement('option'); o.value = k; o.innerText = "Vignette " + k.slice(1); standSel.appendChild(o); });
-standSel.onchange = e => {
-  const a = curActor(); if (!a) return;
-  const mark = STAGE_MARKS[e.target.value];
-  a.x = mark.x; a.y = mark.y; a.standAt = e.target.value;
-  render();
-};
-
-function getActorCounts() {
-  let male = 0, female = 0;
-  items.forEach(i => {
-    if (i.type === 'actor') {
-      if (i.character === 'male') male++;
-      else if (i.character === 'female') female++;
-    }
+  // ---- Audience floor ----
+  const audienceFloorPos = worldToThree(state.ROOM_CENTER.x, state.ROOM_CENTER.y, state.audienceFloorZ);
+  const floorGeo = new THREE.CircleGeometry(state.R_AUDIENCE, 64);
+  const floorMat = new THREE.MeshStandardMaterial({
+    color: 0x999999,
+    roughness: 0.8,
+    metalness: 0,
+    side: THREE.DoubleSide,
   });
-  return { male, female };
-}
+  const audienceFloor = new THREE.Mesh(floorGeo, floorMat);
+  audienceFloor.rotation.x = -Math.PI / 2;
+  audienceFloor.position.copy(audienceFloorPos);
+  audienceFloor.receiveShadow = true;
+  scene.add(audienceFloor);
 
-document.getElementById('addActor').onchange = e => {
-  const choice = e.target.value;
-  if (!choice) return;
-  const conf = CHARACTERS[choice];
-  const counts = getActorCounts();
-  let count = choice === 'male' ? counts.male + 1 : counts.female + 1;
-  const label = conf.label + " " + count;
-
-  const keys = Object.keys(STAGE_MARKS);
-  const markKey = keys[Math.floor(Math.random() * keys.length)];
-  const mark = STAGE_MARKS[markKey];
-  items.push({
-    id: Date.now(),
-    type: "actor",
-    label: label,
-    x: mark.x,
-    y: mark.y,
-    z: 0,
-    w: 0.7,
-    d: 0.4,
-    h: conf.height,
-    facing: 270,
-    color: conf.color,
-    standAt: markKey,
-    character: choice,
-    modelKey: conf.modelKey
+  // ---- Step wall ----
+  const wallHeight = 1.14;
+  const wallGeo = new THREE.CylinderGeometry(state.R_AUDIENCE, state.R_AUDIENCE, wallHeight, 128, 1, true);
+  const wallMat = new THREE.MeshStandardMaterial({
+    color: 0x888888,
+    roughness: 0.6,
+    metalness: 0.2,
+    side: THREE.DoubleSide,
   });
-  activeActor = items[items.length - 1].id;
-  syncActorSel();
-  render();
-  e.target.value = "";
-};
+  const stepWall = new THREE.Mesh(wallGeo, wallMat);
+  const wallPos = worldToThree(state.ROOM_CENTER.x, state.ROOM_CENTER.y, -wallHeight/2);
+  stepWall.position.copy(wallPos);
+  stepWall.receiveShadow = true;
+  scene.add(stepWall);
 
-document.getElementById('deleteActor').onclick = () => {
-  if (!activeActor) return;
-  const idx = items.findIndex(i => i.id === activeActor && i.type === 'actor');
-  if (idx === -1) return;
-  items.splice(idx, 1);
-  const remaining = items.filter(i => i.type === 'actor');
-  activeActor = remaining.length > 0 ? remaining[0].id : null;
-  syncActorSel();
-  render();
-};
+  // ---- Seating positions (same as before) ----
+  function getSeatPositions() {
+    const positions = [];
+    const { R_AUDIENCE, ROOM_CENTER, leftWalkwayLeft, leftWalkwayRight, rightWalkwayLeft, rightWalkwayRight, cutY, seatWidth, seatDepth } = state;
+    const centreY = ROOM_CENTER.y;
+    const radius = R_AUDIENCE;
+    const backY = centreY - radius;
+    let y = backY;
+    while (y <= cutY) {
+      const dy = y - centreY;
+      const r2 = radius * radius - dy * dy;
+      if (r2 <= 0) { y += seatDepth; continue; }
+      const xCirc = Math.sqrt(r2);
+      const leftBound = -xCirc;
+      const rightBound = xCirc;
 
-const actorSel = document.getElementById('actorsel');
-function syncActorSel() {
-  actorSel.innerHTML = '';
-  const actors = items.filter(i => i.type === 'actor');
-  actors.forEach(a => { const o = document.createElement('option'); o.value = a.id; o.innerText = a.label; actorSel.appendChild(o); });
-  if (actors.length > 0 && !actors.some(a => a.id === activeActor)) {
-    activeActor = actors[0].id;
-  }
-  actorSel.value = activeActor || '';
-  syncActorFields();
-}
-actorSel.onchange = e => { activeActor = +e.target.value; syncActorFields(); };
-function curActor() { return items.find(i => i.id === activeActor && i.type === 'actor'); }
-function syncActorFields() {
-  const a = curActor();
-  const ah = document.getElementById('ah');
-  const standAt = document.getElementById('standat');
-  const faces = document.getElementById('faces');
-  if (!a) {
-    ah.value = '';
-    standAt.value = '';
-    faces.value = 0;
-    document.getElementById('facev').innerText = '—';
-    return;
-  }
-  document.getElementById('faces').value = a.facing;
-  document.getElementById('facev').innerText = a.facing + "°";
-  ah.value = a.h;
-  standAt.value = a.standAt || "V3";
-}
-document.getElementById('faces').oninput = e => {
-  const a = curActor();
-  if (!a) return;
-  a.facing = +e.target.value;
-  document.getElementById('facev').innerText = e.target.value + "°";
-  render();
-};
-document.getElementById('ah').onchange = e => {
-  const a = curActor();
-  if (!a) return;
-  a.h = +e.target.value;
-  render();
-};
+      const leftBlockStart = leftBound;
+      const leftBlockEnd = leftWalkwayLeft;
+      const centreBlockStart = leftWalkwayRight;
+      const centreBlockEnd = rightWalkwayLeft;
+      const rightBlockStart = rightWalkwayRight;
+      const rightBlockEnd = rightBound;
 
-function syncControls() {
-  const c = CAMS[active];
-  slider.value = c.lens;
-  document.getElementById('fv').innerText = c.lens + "mm";
-  chzSlider.value = c.z; document.getElementById('chz').innerText = toFeetInches(c.z);
-  azSlider.value = c.aimZ; document.getElementById('az').innerText = toFeetInches(c.aimZ);
-  aimSel.value = c.aim;
-  document.getElementById('camtype').innerText = c.type === "track" ? "Track camera — position below" : "Fixed position";
-  document.getElementById('trackrow').style.display = c.type === "track" ? "block" : "none";
-  if (c.type === "track") { tpSlider.value = c.trackPos; document.getElementById('tpv').innerText = Math.round(c.trackPos * 100) + "%"; }
-}
-
-function updateDistance() {
-  const c = CAMS[active];
-  const a = curActor();
-  const distEl = document.getElementById('distval');
-  if (!distEl || !a) { distEl.innerText = "—"; return; }
-  const dx = c.x - a.x, dy = c.y - a.y, dz = c.z - a.z;
-  const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-  distEl.innerText = toFeetInches(dist);
-}
-
-// ---------- Colour helpers ----------
-function shade(hex, percent) {
-  const num = parseInt(hex.slice(1), 16);
-  let r = (num >> 16) + Math.round(2.55 * percent);
-  let g = ((num >> 8) & 0xff) + Math.round(2.55 * percent);
-  let b = (num & 0xff) + Math.round(2.55 * percent);
-  r = Math.min(255, Math.max(0, r)); g = Math.min(255, Math.max(0, g)); b = Math.min(255, Math.max(0, b));
-  return "#" + r.toString(16).padStart(2, '0') + g.toString(16).padStart(2, '0') + b.toString(16).padStart(2, '0');
-}
-
-// ---------- 3D camera math ----------
-function norm(v) { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; }
-function cross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
-function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
-function fov(f) { return { h: 2 * Math.atan(SW / (2 * f)), v: 2 * Math.atan(SH / (2 * f)) }; }
-function camBasis(c) {
-  const fwd = norm([c.aimX - c.x, c.aimY - c.y, c.aimZ - c.z]);
-  const right = norm(cross(fwd, [0, 0, 1]));
-  const up = cross(right, fwd);
-  return { fwd, right, up };
-}
-function project(c, basis, angles, w, h, px, py, pz) {
-  const rel = [px - c.x, py - c.y, pz - c.z];
-  const zc = dot(rel, basis.fwd);
-  if (zc <= 0.05) return null;
-  const xc = dot(rel, basis.right), yc = dot(rel, basis.up);
-  const ndx = (xc / zc) / Math.tan(angles.h / 2);
-  const ndy = (yc / zc) / Math.tan(angles.v / 2);
-  return { x: w / 2 + ndx * w / 2, y: h / 2 - ndy * h / 2, depth: zc };
-}
-
-function render() { updateDistance(); drawFP(); drawVF(); if (window.Previz3DRender) window.Previz3DRender(); }
-
-// ---------- Floor plan (with accurate seating) ----------
-function drawFP() {
-  const cv = document.getElementById('fp'), ctx = cv.getContext('2d');
-  const dpr = window.devicePixelRatio || 1, rect = cv.getBoundingClientRect();
-  cv.width = rect.width * dpr; cv.height = rect.height * dpr; ctx.scale(dpr, dpr);
-  const w = rect.width, h = rect.height; ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, w, h);
-  const baseScale = Math.min(w, h) / (2 * 20);
-  const scale = baseScale * viewZoom;
-  const cx = w / 2 + viewPanX, cy = h / 2 + viewPanY;
-  const toPx = (x, y) => ({ x: cx + (x - ROOM_CENTER.x) * scale, y: cy - (y - ROOM_CENTER.y) * scale });
-  const fromPx = (px, py) => ({ x: (px - cx) / scale + ROOM_CENTER.x, y: ROOM_CENTER.y - (py - cy) / scale });
-  window._fpT = { toPx, fromPx };
-
-  // ---- Seating geometry ----
-  const centreX = 0, centreY = -R_WALL;
-  const radius = R_AUDIENCE;
-
-  // Walkway boundaries (in metres) – user provided: -21ft to -15ft and +15ft to +21ft
-  const leftWalkwayLeft = -6.401;   // -21ft
-  const leftWalkwayRight = -4.572;  // -15ft
-  const rightWalkwayLeft = 4.572;   // +15ft
-  const rightWalkwayRight = 6.401;  // +21ft
-
-  // Stage cut‑out: remove seats above (closer to stage) a chord 12ft back from the frontmost point
-  const frontY = centreY + radius;  // -3.66m (front edge of the circle)
-  const cutY = frontY - 3.66;       // -7.32m (12ft back)
-
-  // Back limit: the backmost point of the circle
-  const backY = centreY - radius;   // -32.66m
-
-  // Seat dimensions
-  const seatWidth = 0.45;
-  const seatDepth = 0.6;
-
- // ---- Stage cut‑out area (removed) ----
-/*
-const dyCut = cutY - centreY;
-const chordX = Math.sqrt(radius * radius - dyCut * dyCut);
-const angle1 = Math.atan2(dyCut, -chordX);
-const angle2 = Math.atan2(dyCut, chordX);
-ctx.beginPath();
-ctx.moveTo(toPx(-chordX, cutY).x, toPx(-chordX, cutY).y);
-ctx.arc(toPx(centreX, centreY).x, toPx(centreX, centreY).y, radius * scale, angle1, angle2, true);
-ctx.closePath();
-ctx.fillStyle = "rgba(100, 150, 255, 0.15)";
-ctx.strokeStyle = "#4488ff";
-ctx.lineWidth = 2;
-ctx.fill();
-*/
-
-
-  // ---- Draw seats ----
-  ctx.fillStyle = "#c9c9cf";
-  ctx.strokeStyle = "#999";
-  ctx.lineWidth = 0.5;
-
-  let y = backY;
-  while (y <= cutY) {
-    const dy = y - centreY;
-    const r2 = radius * radius - dy * dy;
-    if (r2 <= 0) { y += seatDepth; continue; }
-    const xCirc = Math.sqrt(r2);
-    const leftBound = -xCirc;
-    const rightBound = xCirc;
-
-    // Define block boundaries
-    const leftBlockStart = leftBound;
-    const leftBlockEnd = leftWalkwayLeft;
-    const centreBlockStart = leftWalkwayRight;
-    const centreBlockEnd = rightWalkwayLeft;
-    const rightBlockStart = rightWalkwayRight;
-    const rightBlockEnd = rightBound;
-
-    function drawBlock(start, end, yPos) {
-      if (end <= start) return;
-      const width = end - start;
-      const numSeats = Math.floor(width / seatWidth);
-      if (numSeats <= 0) return;
-      const seatW = width / numSeats;
-      for (let s = 0; s < numSeats; s++) {
-        const x = start + s * seatW + seatW * 0.08;
-        const p1 = toPx(x, yPos);
-        const p2 = toPx(x + seatW * 0.8, yPos - seatDepth * 0.55);
-        const ww = Math.abs(p2.x - p1.x);
-        const hh = Math.abs(p2.y - p1.y);
-        if (ww < 1 || hh < 1) continue;
-        ctx.fillRect(Math.min(p1.x, p2.x), Math.min(p1.y, p2.y), ww, hh);
-        ctx.strokeRect(Math.min(p1.x, p2.x), Math.min(p1.y, p2.y), ww, hh);
+      function addBlock(start, end, yPos) {
+        if (end <= start) return;
+        const width = end - start;
+        const numSeats = Math.floor(width / seatWidth);
+        if (numSeats <= 0) return;
+        const seatW = width / numSeats;
+        for (let s = 0; s < numSeats; s++) {
+          const x = start + s * seatW + seatW * 0.08;
+          positions.push({ x, y: yPos });
+        }
       }
+
+      addBlock(leftBlockStart, leftBlockEnd, y);
+      addBlock(centreBlockStart, centreBlockEnd, y);
+      addBlock(rightBlockStart, rightBlockEnd, y);
+
+      y += seatDepth;
     }
-
-    drawBlock(leftBlockStart, leftBlockEnd, y);
-    drawBlock(centreBlockStart, centreBlockEnd, y);
-    drawBlock(rightBlockStart, rightBlockEnd, y);
-
-    y += seatDepth;
+    return positions;
   }
 
-  // ---- Draw stage floor / walkway (ring from R_AUDIENCE to R_WALL) ----
-  ctx.fillStyle = "#e8e4df";
-  ctx.strokeStyle = "#d0ccc6";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.arc(cx, cy, R_WALL * scale, 0, 7);
-  ctx.arc(cx, cy, R_AUDIENCE * scale, 0, 7, true);
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
+  const seatPositions = getSeatPositions();
+  console.log(`Creating ${seatPositions.length} seats in 3D`);
 
-  // ---- Audience circle (dashed) ----
-  ctx.setLineDash([4, 4]);
-  ctx.strokeStyle = "#aaa";
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.arc(cx, cy, R_AUDIENCE * scale, 0, 7);
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  // ---- Blue margin ----
-  ctx.strokeStyle = "#2196F3";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.arc(cx, cy, R_AUDIENCE * scale, 0, 7);
-  ctx.stroke();
-
-  // ---- Vignette recesses: wedge infill first (solid wall between recesses), then recess polygons ----
-  ctx.fillStyle = "#cfcac2";
-  ctx.strokeStyle = "#b5afa6";
-  ctx.lineWidth = 1;
-  for (let i = 0; i < VIGNETTE_ORDER.length - 1; i++) {
-    const a = VIGNETTE_FOOTPRINTS[VIGNETTE_ORDER[i]], b = VIGNETTE_FOOTPRINTS[VIGNETTE_ORDER[i + 1]];
-    const shared = toPx(a.frontR.x, a.frontR.y);
-    const backA = toPx(a.backR.x, a.backR.y);
-    const backB = toPx(b.backL.x, b.backL.y);
-    ctx.beginPath();
-    ctx.moveTo(shared.x, shared.y);
-    ctx.lineTo(backA.x, backA.y);
-    ctx.lineTo(backB.x, backB.y);
-    ctx.closePath();
-    ctx.fill(); ctx.stroke();
-  }
-
-  VIGNETTE_ORDER.forEach(name => {
-    const fp = VIGNETTE_FOOTPRINTS[name];
-    const pts = [fp.frontL, fp.frontR, fp.backR, fp.backL].map(p => toPx(p.x, p.y));
-    ctx.fillStyle = VIGNETTE_COLORS[name];
-    ctx.strokeStyle = "#6C5CE7"; ctx.lineWidth = 2;
-    ctx.beginPath();
-    pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
-    ctx.closePath(); ctx.fill(); ctx.stroke();
-
-    const midBack = { x: (fp.backL.x + fp.backR.x) / 2, y: (fp.backL.y + fp.backR.y) / 2 };
-    const labelPos = toPx(midBack.x, midBack.y);
-    ctx.fillStyle = "#4b3fb0"; ctx.font = "bold 10px monospace"; ctx.textAlign = "center";
-    ctx.fillText(name, labelPos.x, labelPos.y);
+  const seatGroup = new THREE.Group();
+  const seatMat = new THREE.MeshStandardMaterial({ color: 0xb0b0b0, roughness: 0.6 });
+  const seatGeo = new THREE.BoxGeometry(state.seatWidth * 0.8, 0.1, state.seatDepth * 0.7);
+  seatPositions.forEach(pos => {
+    const seat = new THREE.Mesh(seatGeo, seatMat);
+    const threePos = worldToThree(pos.x, pos.y, state.audienceFloorZ + 0.05);
+    seat.position.copy(threePos);
+    const dx = 0 - pos.x;
+    const dy = ROOM_CENTER.y - pos.y;
+    const angle = Math.atan2(dy, dx);
+    seat.rotation.y = -angle;
+    seat.castShadow = true;
+    seat.receiveShadow = true;
+    seatGroup.add(seat);
   });
-  ctx.lineWidth = 1;
+  scene.add(seatGroup);
 
-  // ---- Origin marker (red dot) ----
-  const originPx = toPx(0, 0);
-  ctx.fillStyle = "#D8433B";
-  ctx.beginPath(); ctx.arc(originPx.x, originPx.y, 5, 0, 7); ctx.fill();
+  // ---- Vignette recesses: real 3D volumes ----
+  // Each vignette is a rectangular recess (side walls + back wall + floor) touching its neighbour
+  // only at the front (mouth) corner, with a wedge-shaped wall cap closing the gap behind that
+  // point. A separate flush panel sits above (10ft–20ft), level with the mouth, not recessed.
 
-  // ---- Cameras ----
-  Object.keys(CAMS).forEach(k => {
-    const c = CAMS[k], p = toPx(c.x, c.y);
-    if (c.type === "track") {
-      const p0 = toPx(c.path[0].x, c.path[0].y), p1 = toPx(c.path[1].x, c.path[1].y);
-      ctx.strokeStyle = "#aaa"; ctx.setLineDash([3, 2]);
-      ctx.beginPath(); ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y); ctx.stroke(); ctx.setLineDash([]);
-    }
-    ctx.fillStyle = k === active ? "#0F9D74" : "#8a8a8a";
-    ctx.beginPath(); ctx.arc(p.x, p.y, k === active ? 6 : 4, 0, 7); ctx.fill();
-    ctx.fillStyle = "#333"; ctx.font = "9px monospace"; ctx.textAlign = "left"; ctx.fillText(k.split(' ')[0], p.x + 6, p.y + 3);
-    if (k === active) {
-      const aimPx = toPx(c.aimX, c.aimY);
-      window._aimPx = aimPx;
-      ctx.strokeStyle = "rgba(15,157,116,0.7)"; ctx.setLineDash([4, 3]);
-      ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(aimPx.x, aimPx.y); ctx.stroke(); ctx.setLineDash([]);
-      // Larger aim crosshair
-      ctx.strokeStyle = "#0F9D74"; ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      ctx.moveTo(aimPx.x - 10, aimPx.y); ctx.lineTo(aimPx.x + 10, aimPx.y);
-      ctx.moveTo(aimPx.x, aimPx.y - 10); ctx.lineTo(aimPx.x, aimPx.y + 10);
+  function quadGeometry(p1, p2, p3, p4) {
+    // p1..p4 wound around the quad perimeter (THREE.Vector3 in three.js world space)
+    const geo = new THREE.BufferGeometry();
+    const verts = new Float32Array([
+      p1.x, p1.y, p1.z, p2.x, p2.y, p2.z, p3.x, p3.y, p3.z,
+      p1.x, p1.y, p1.z, p3.x, p3.y, p3.z, p4.x, p4.y, p4.z
+    ]);
+    const uvs = new Float32Array([0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1]);
+    geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    geo.computeVertexNormals();
+    return geo;
+  }
+
+  function triGeometry(p1, p2, p3) {
+    const geo = new THREE.BufferGeometry();
+    const verts = new Float32Array([p1.x, p1.y, p1.z, p2.x, p2.y, p2.z, p3.x, p3.y, p3.z]);
+    const uvs = new Float32Array([0, 0, 1, 0, 0.5, 1]);
+    geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    geo.computeVertexNormals();
+    return geo;
+  }
+
+  const neutralWallMat = new THREE.MeshStandardMaterial({
+    color: 0xe8e4df, roughness: 0.75, metalness: 0.05, side: THREE.DoubleSide
+  });
+  const recessFloorMat = new THREE.MeshStandardMaterial({
+    color: 0xd8d4cd, roughness: 0.8, metalness: 0.0, side: THREE.DoubleSide
+  });
+
+  // ---- Procedural backdrop textures — approximations of each vignette's distinct look, not
+  // reproductions of the actual set art (which we don't have at any usable resolution) ----
+  function makeCanvas() {
+    const c = document.createElement('canvas');
+    c.width = 1024; c.height = 512;
+    return c;
+  }
+
+  function textureV1(ctx, w, h) {
+    // Jagged rock / canyon linework — deep steel blue
+    const grad = ctx.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, '#4a6a94'); grad.addColorStop(1, '#1f3350');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = 'rgba(220,235,255,0.35)';
+    for (let i = 0; i < 26; i++) {
+      let y = Math.random() * h;
+      ctx.lineWidth = 1 + Math.random() * 2;
+      ctx.beginPath(); ctx.moveTo(0, y);
+      for (let x = 0; x <= w; x += w / 24) { y += (Math.random() - 0.5) * h * 0.12; ctx.lineTo(x, y); }
       ctx.stroke();
-      ctx.lineWidth = 1;
-      const angles = fov(c.lens);
-      const camAngle = Math.atan2(c.aimY - c.y, c.aimX - c.x);
-      ctx.fillStyle = "rgba(15,157,116,0.10)";
-      ctx.beginPath(); ctx.moveTo(p.x, p.y);
-      const range = 400;
-      ctx.lineTo(p.x + Math.cos(camAngle - angles.h / 2) * range, p.y - Math.sin(camAngle - angles.h / 2) * range);
-      ctx.lineTo(p.x + Math.cos(camAngle + angles.h / 2) * range, p.y - Math.sin(camAngle + angles.h / 2) * range);
-      ctx.closePath(); ctx.fill();
     }
-  });
+  }
 
-  // ---- Items (actors & props) ----
-  items.forEach(it => {
-    const p = toPx(it.x, it.y);
-    if (it.type === "actor") {
-      const rx = Math.max((it.w / 2) * scale, 2), ry = Math.max((it.d / 2) * scale, 1.4);
-      let rotation = -it.facing * D2R - Math.PI / 2;
-// Brian's model is rotated 90° clockwise relative to the arrow system
-if (it.modelKey === 'brian') {
-  rotation -= Math.PI / 2; // subtract 90° to match his 3D facing
-}
-ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(rotation);
-      ctx.fillStyle = it.color; ctx.beginPath(); ctx.ellipse(0, 0, rx, ry, 0, 0, 7); ctx.fill();
-      ctx.strokeStyle = "#fff"; ctx.lineWidth = it.id === activeActor ? 2 : 0.5; ctx.stroke();
-      // Arrow points forward (towards facing direction) – fixed
-      ctx.fillStyle = "#333";
-      ctx.beginPath();
-      ctx.moveTo(rx + 5, 0);
-      ctx.lineTo(rx - 2, -3);
-      ctx.lineTo(rx - 2, 3);
-      ctx.closePath();
+  function textureV2(ctx, w, h) {
+    // Organic branching / coral weave — burnt amber
+    const grad = ctx.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, '#9a6a2e'); grad.addColorStop(1, '#5a3313');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = 'rgba(255,235,200,0.55)';
+    function branch(x, y, angle, len, depth) {
+      if (depth <= 0 || len < 4) return;
+      const x2 = x + Math.cos(angle) * len, y2 = y + Math.sin(angle) * len;
+      ctx.lineWidth = Math.max(0.6, depth * 0.5);
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x2, y2); ctx.stroke();
+      const spread = 0.5 + Math.random() * 0.4;
+      branch(x2, y2, angle - spread, len * 0.72, depth - 1);
+      branch(x2, y2, angle + spread, len * 0.72, depth - 1);
+    }
+    for (let i = 0; i < 6; i++) branch((i + 0.5) * (w / 6), h, -Math.PI / 2 + (Math.random() - 0.5) * 0.6, h * 0.32, 7);
+  }
+
+  function textureV3(ctx, w, h) {
+    // Terraced mountain ridges — deep forest green
+    ctx.fillStyle = '#16321f'; ctx.fillRect(0, 0, w, h);
+    const bands = 6;
+    for (let b = 0; b < bands; b++) {
+      const baseY = h * (0.25 + b * (0.7 / bands));
+      ctx.beginPath(); ctx.moveTo(0, h);
+      let y = baseY;
+      for (let x = 0; x <= w; x += w / 40) { y += (Math.random() - 0.5) * 14; ctx.lineTo(x, y); }
+      ctx.lineTo(w, h); ctx.closePath();
+      const g = 90 + b * 14;
+      ctx.fillStyle = `rgb(${Math.round(g * 0.35)},${g},${Math.round(g * 0.45)})`;
       ctx.fill();
-      ctx.restore();
-      ctx.strokeStyle = it.color; ctx.setLineDash([2, 2]); ctx.lineWidth = 1.2;
-      ctx.beginPath(); ctx.arc(p.x, p.y, 9, 0, 7); ctx.stroke(); ctx.setLineDash([]);
-      ctx.fillStyle = "#222"; ctx.font = "bold 9px monospace"; ctx.textAlign = "left"; ctx.fillText(it.label, p.x + 11, p.y + 3);
-    } else {
-      const trueR = Math.max((it.w / 2) * scale, 2.5);
-      ctx.fillStyle = it.color; ctx.beginPath(); ctx.arc(p.x, p.y, trueR, 0, 7); ctx.fill();
-      ctx.strokeStyle = "#fff"; ctx.lineWidth = it === dragging ? 2 : 0.5; ctx.stroke();
-      ctx.strokeStyle = it.color; ctx.setLineDash([2, 2]);
-      ctx.beginPath(); ctx.arc(p.x, p.y, 9, 0, 7); ctx.stroke(); ctx.setLineDash([]);
-      ctx.fillStyle = "#222"; ctx.font = "9px monospace"; ctx.textAlign = "left"; ctx.fillText(it.label, p.x + 11, p.y + 3);
     }
-  });
-}
-
-// ---------- Viewfinder background: floor grid + vignette backdrops ----------
-function drawFloorGrid(ctx, c, basis, angles, w, h) {
-  ctx.strokeStyle = "rgba(0,0,0,0.08)"; ctx.lineWidth = 1;
-  for (let x = -16; x <= 16; x += 4) {
-    ctx.beginPath(); let started = false;
-    for (let y = -30; y <= 15; y += 2) {
-      const p = project(c, basis, angles, w, h, x, y, 0);
-      if (!p) { started = false; continue; }
-      if (!started) { ctx.moveTo(p.x, p.y); started = true; } else { ctx.lineTo(p.x, p.y); }
-    }
-    ctx.stroke();
   }
-  for (let y = -30; y <= 15; y += 4) {
-    ctx.beginPath(); let started = false;
-    for (let x = -16; x <= 16; x += 2) {
-      const p = project(c, basis, angles, w, h, x, y, 0);
-      if (!p) { started = false; continue; }
-      if (!started) { ctx.moveTo(p.x, p.y); started = true; } else { ctx.lineTo(p.x, p.y); }
+
+  function textureV4(ctx, w, h) {
+    // Angular staircase — deep berry/magenta
+    ctx.fillStyle = '#3a1226'; ctx.fillRect(0, 0, w, h);
+    const steps = 10;
+    for (let i = 0; i < steps; i++) {
+      const x0 = (i / steps) * w;
+      const stepH = (i / steps) * h * 0.7;
+      const r = 100 + i * 12, g = 20 + i * 4, b = 60 + i * 8;
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillRect(x0, h - stepH, w / steps + 1, stepH);
+      ctx.strokeStyle = 'rgba(255,220,235,0.25)';
+      ctx.strokeRect(x0, h - stepH, w / steps + 1, stepH);
     }
-    ctx.stroke();
   }
-}
-function drawVignettePanels(ctx, c, basis, angles, w, h) {
-  VIGNETTE_ORDER.forEach(name => {
-    const fp = VIGNETTE_FOOTPRINTS[name];
-    const proj = (p, z) => project(c, basis, angles, w, h, p.x, p.y, z);
 
-    const backL0 = proj(fp.backL, 0), backR0 = proj(fp.backR, 0);
-    const backLh = proj(fp.backL, VIGNETTE_LOWER_H), backRh = proj(fp.backR, VIGNETTE_LOWER_H);
-    const frontL0 = proj(fp.frontL, 0), frontR0 = proj(fp.frontR, 0);
-    const frontLh = proj(fp.frontL, VIGNETTE_LOWER_H), frontRh = proj(fp.frontR, VIGNETTE_LOWER_H);
-    const frontLtop = proj(fp.frontL, VIGNETTE_TOTAL_H), frontRtop = proj(fp.frontR, VIGNETTE_TOTAL_H);
-    if (!backL0 || !backR0 || !backLh || !backRh || !frontL0 || !frontR0 || !frontLh || !frontRh) return;
+  function textureV5(ctx, w, h) {
+    // Elliptical "planet" swirl — deep violet
+    const grad = ctx.createLinearGradient(0, 0, w, h);
+    grad.addColorStop(0, '#3a2159'); grad.addColorStop(1, '#1c1030');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, w, h);
+    const cx = w / 2, cy = h / 2;
+    ctx.strokeStyle = 'rgba(230,210,255,0.4)';
+    for (let r = 20; r < Math.max(w, h); r += 22) {
+      ctx.lineWidth = 1 + (r % 66 === 0 ? 1 : 0);
+      ctx.beginPath(); ctx.ellipse(cx, cy, r * 1.15, r * 0.55, 0, 0, Math.PI * 2); ctx.stroke();
+    }
+  }
 
-    ctx.fillStyle = "rgba(108,92,231,0.18)"; ctx.strokeStyle = "rgba(108,92,231,0.55)";
-    // Back wall
-    ctx.beginPath(); ctx.moveTo(backL0.x, backL0.y); ctx.lineTo(backR0.x, backR0.y); ctx.lineTo(backRh.x, backRh.y); ctx.lineTo(backLh.x, backLh.y); ctx.closePath();
-    ctx.fill(); ctx.stroke();
+  const TEXTURE_FNS = { V1: textureV1, V2: textureV2, V3: textureV3, V4: textureV4, V5: textureV5 };
+  function makeVignetteTexture(name) {
+    const canvas = makeCanvas();
+    const ctx = canvas.getContext('2d');
+    (TEXTURE_FNS[name] || textureV1)(ctx, canvas.width, canvas.height);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }
+
+  const LOWER_H = state.VIGNETTE_LOWER_H, TOTAL_H = state.VIGNETTE_TOTAL_H;
+
+  state.VIGNETTE_ORDER.forEach(name => {
+    const fp = state.VIGNETTE_FOOTPRINTS[name];
+    const w3 = (p, z) => worldToThree(p.x, p.y, z);
+
+    const frontL0 = w3(fp.frontL, 0), frontR0 = w3(fp.frontR, 0);
+    const backL0 = w3(fp.backL, 0), backR0 = w3(fp.backR, 0);
+    const frontLh = w3(fp.frontL, LOWER_H), frontRh = w3(fp.frontR, LOWER_H);
+    const backLh = w3(fp.backL, LOWER_H), backRh = w3(fp.backR, LOWER_H);
+    const frontLtop = w3(fp.frontL, TOTAL_H), frontRtop = w3(fp.frontR, TOTAL_H);
+    const backLtop = w3(fp.backL, TOTAL_H), backRtop = w3(fp.backR, TOTAL_H);
+
+    // Back wall — unique texture per vignette
+    const backMat = new THREE.MeshStandardMaterial({
+      map: makeVignetteTexture(name), roughness: 0.85, metalness: 0.0, side: THREE.DoubleSide
+    });
+    const backWall = new THREE.Mesh(quadGeometry(backL0, backR0, backRh, backLh), backMat);
+    backWall.receiveShadow = true;
+    scene.add(backWall);
+
     // Side walls
-    ctx.beginPath(); ctx.moveTo(frontL0.x, frontL0.y); ctx.lineTo(backL0.x, backL0.y); ctx.lineTo(backLh.x, backLh.y); ctx.lineTo(frontLh.x, frontLh.y); ctx.closePath(); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(frontR0.x, frontR0.y); ctx.lineTo(backR0.x, backR0.y); ctx.lineTo(backRh.x, backRh.y); ctx.lineTo(frontRh.x, frontRh.y); ctx.closePath(); ctx.stroke();
-    // Upper flush panel
-    if (frontLtop && frontRtop) {
-      ctx.beginPath(); ctx.moveTo(frontLh.x, frontLh.y); ctx.lineTo(frontRh.x, frontRh.y); ctx.lineTo(frontRtop.x, frontRtop.y); ctx.lineTo(frontLtop.x, frontLtop.y); ctx.closePath(); ctx.stroke();
-    }
+    const sideL = new THREE.Mesh(quadGeometry(frontL0, backL0, backLh, frontLh), neutralWallMat);
+    const sideR = new THREE.Mesh(quadGeometry(backR0, frontR0, frontRh, backRh), neutralWallMat);
+    sideL.receiveShadow = true; sideR.receiveShadow = true;
+    scene.add(sideL); scene.add(sideR);
 
-    ctx.fillStyle = "#4b3fb0"; ctx.font = "10px monospace"; ctx.textAlign = "center";
-    ctx.fillText(name, (backL0.x + backR0.x) / 2, (backLh.y + backL0.y) / 2);
-  });
-}
+    // Recess floor
+    const floor = new THREE.Mesh(quadGeometry(frontL0, frontR0, backR0, backL0), recessFloorMat);
+    floor.receiveShadow = true;
+    scene.add(floor);
 
-// ---------- Viewfinder ----------
-function drawVF() {
-  const cv = document.getElementById('vf'), ctx = cv.getContext('2d');
-  const dpr = window.devicePixelRatio || 1, rect = cv.getBoundingClientRect();
-  cv.width = rect.width * dpr; cv.height = rect.height * dpr; ctx.scale(dpr, dpr);
-  const w = rect.width, h = rect.height; ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, w, h);
-  const c = CAMS[active], basis = camBasis(c), angles = fov(c.lens);
-  drawFloorGrid(ctx, c, basis, angles, w, h);
-  drawVignettePanels(ctx, c, basis, angles, w, h);
+    // Upper flush panel (10ft–20ft) — sits at the mouth, not recessed
+    const upperPanel = new THREE.Mesh(quadGeometry(frontLh, frontRh, frontRtop, frontLtop), neutralWallMat);
+    upperPanel.receiveShadow = true;
+    scene.add(upperPanel);
 
-  let closestActor = null, closestDepth = Infinity;
-  const withDepth = items.map(it => {
-    const base = project(c, basis, angles, w, h, it.x, it.y, it.z);
-    return base ? { it, depth: base.depth } : null;
-  }).filter(Boolean).sort((a, b) => b.depth - a.depth);
-
-  withDepth.forEach(({ it, depth }) => {
-    if (it.type === 'actor' && depth < closestDepth) {
-      closestDepth = depth;
-      closestActor = it;
-    }
+    // Roof — closes the top of the box (was open, visible from above/wide angles)
+    const roof = new THREE.Mesh(quadGeometry(backLtop, backRtop, frontRtop, frontLtop), neutralWallMat);
+    roof.receiveShadow = true;
+    scene.add(roof);
   });
 
-  withDepth.forEach(({ it }) => {
-    const base = project(c, basis, angles, w, h, it.x, it.y, it.z);
-    const top = project(c, basis, angles, w, h, it.x, it.y, it.z + it.h);
-    if (!base || !top) return;
+  // Wedge caps: close the solid-wall gap between neighbouring recesses' back walls
+  for (let i = 0; i < state.VIGNETTE_ORDER.length - 1; i++) {
+    const a = state.VIGNETTE_FOOTPRINTS[state.VIGNETTE_ORDER[i]];
+    const b = state.VIGNETTE_FOOTPRINTS[state.VIGNETTE_ORDER[i + 1]];
+    const w3 = (p, z) => worldToThree(p.x, p.y, z);
+    const p1 = w3(a.backR, 0), p2 = w3(b.backL, 0);
+    const p1h = w3(a.backR, LOWER_H), p2h = w3(b.backL, LOWER_H);
+    const shared = w3(a.frontR, LOWER_H); // == b.frontL, the touching corner
+    const wedge = new THREE.Mesh(quadGeometry(p1, p2, p2h, p1h), neutralWallMat);
+    wedge.receiveShadow = true;
+    scene.add(wedge);
+    // Wedge roof (closes the top of the gap — above LOWER_H the upper flush panels
+    // already join seamlessly, so only this lower triangular volume needs capping)
+    const wedgeRoof = new THREE.Mesh(triGeometry(p1h, p2h, shared), neutralWallMat);
+    wedgeRoof.receiveShadow = true;
+    scene.add(wedgeRoof);
+  }
 
-    if (it.type === "actor") {
-      const bearing = Math.atan2(c.y - it.y, c.x - it.x) / D2R;
-      let rel = bearing - it.facing;
-      while (rel > 180) rel -= 360;
-      while (rel < -180) rel += 360;
-      const relRad = rel * D2R;
-      const apparent = Math.abs(it.w * Math.cos(relRad)) + Math.abs(it.d * Math.sin(relRad));
-      const pw = (apparent / base.depth) / Math.tan(angles.h / 2) * (w / 2);
-      const ph = base.y - top.y;
+  // ---- Character model loading ----
+  // 👈 ADDED ELIZABETH URL
+  const MODEL_URLS = {
+    brian: './Brian_Upright.glb',
+    elizabeth: './Elizabeth_Upright.glb'
+  };
+  const templateCache = new Map();
 
-      ctx.save(); ctx.globalAlpha = 0.18; ctx.fillStyle = "#000";
-      ctx.beginPath(); ctx.ellipse(base.x, base.y + 1, pw * 0.6, pw * 0.16, 0, 0, 7); ctx.fill();
-      ctx.restore();
+  async function loadCharacterTemplate(modelKey) {
+    const url = MODEL_URLS[modelKey] || MODEL_URLS.brian;
+    const loader = new GLTFLoader();
+    console.log(`🔄 Loading character "${modelKey}" from:`, url);
+    try {
+      const gltf = await loader.loadAsync(url);
+      const root = new THREE.Group();
+      root.name = 'CharacterRoot';
+      root.add(gltf.scene);
 
-      const headDiam = ph / 7.5;
-      const headR = headDiam / 2;
-      const headCenterY = top.y + headR;
-      const neckW = pw * 0.32;
-      const shoulderY = top.y + headDiam + headR * 0.4;
+      const box = new THREE.Box3().setFromObject(root);
+      const size = new THREE.Vector3();
+      box.getSize(size);
+      const rawHeight = size.y > 0.001 ? size.y : 1;
+      console.log(`📦 "${modelKey}" raw height (Y):`, rawHeight);
 
-      const bodyGrad = ctx.createLinearGradient(base.x - pw / 2, shoulderY, base.x + pw / 2, base.y);
-      bodyGrad.addColorStop(0, shade(it.color, 18));
-      bodyGrad.addColorStop(1, shade(it.color, -12));
-      ctx.fillStyle = bodyGrad;
-      ctx.beginPath();
-      ctx.moveTo(base.x - neckW / 2, headCenterY + headR * 0.6);
-      ctx.lineTo(base.x + neckW / 2, headCenterY + headR * 0.6);
-      ctx.lineTo(base.x + pw / 2, shoulderY);
-      ctx.lineTo(base.x + pw / 2, base.y);
-      ctx.lineTo(base.x - pw / 2, base.y);
-      ctx.lineTo(base.x - pw / 2, shoulderY);
-      ctx.closePath(); ctx.fill();
+      root.traverse((child) => {
+        if (child.isMesh) {
+          child.material = new THREE.MeshStandardMaterial({
+            color: 0xffffff,
+            roughness: 0.55,
+            metalness: 0.0,
+            emissive: new THREE.Color(0x151515),
+          });
+          child.castShadow = true;
+          child.receiveShadow = true;
+        }
+      });
 
-      const headGrad = ctx.createRadialGradient(base.x - headR * 0.3, headCenterY - headR * 0.3, headR * 0.1, base.x, headCenterY, headR * 1.3);
-      headGrad.addColorStop(0, "#fbe3c4"); headGrad.addColorStop(1, "#dcb488");
-      ctx.fillStyle = headGrad;
-      ctx.beginPath(); ctx.arc(base.x, headCenterY, headR, 0, 7); ctx.fill();
-      ctx.strokeStyle = "rgba(0,0,0,0.15)"; ctx.stroke();
+      console.log(`✅ "${modelKey}" template ready (whiter)`);
+      return { root, rawHeight };
+    } catch (err) {
+      console.error(`❌ "${modelKey}" load failed:`, err);
+      return null;
+    }
+  }
 
-      if (Math.abs(rel) < 60) {
-        ctx.fillStyle = "#2a2a2a";
-        ctx.beginPath(); ctx.arc(base.x - headR * 0.35, headCenterY - headR * 0.1, headR * 0.12, 0, 7); ctx.fill();
-        ctx.beginPath(); ctx.arc(base.x + headR * 0.35, headCenterY - headR * 0.1, headR * 0.12, 0, 7); ctx.fill();
-        ctx.strokeStyle = "rgba(0,0,0,0.4)"; ctx.beginPath(); ctx.moveTo(base.x, headCenterY + headR * 0.1); ctx.lineTo(base.x, headCenterY + headR * 0.4); ctx.stroke();
-      } else if (Math.abs(rel) > 120) {
-        ctx.strokeStyle = "rgba(0,0,0,0.25)";
-        for (let i = -2; i <= 2; i++) { ctx.beginPath(); ctx.moveTo(base.x + i * headR * 0.3, headCenterY - headR * 0.9); ctx.lineTo(base.x + i * headR * 0.3, headCenterY - headR * 0.1); ctx.stroke(); }
-      } else {
-        const side = rel > 0 ? 1 : -1;
-        ctx.fillStyle = "#2a2a2a"; ctx.beginPath(); ctx.arc(base.x + side * headR * 0.4, headCenterY, headR * 0.1, 0, 7); ctx.fill();
-        ctx.beginPath(); ctx.moveTo(base.x + side * headR * 0.7, headCenterY + headR * 0.05); ctx.lineTo(base.x + side * headR * 0.95, headCenterY + headR * 0.15); ctx.lineTo(base.x + side * headR * 0.7, headCenterY + headR * 0.25); ctx.closePath(); ctx.fill();
-      }
-      ctx.fillStyle = "#222"; ctx.font = "9px monospace"; ctx.textAlign = "center"; ctx.fillText(it.label, base.x, base.y + 11);
+  async function getTemplate(modelKey) {
+    if (!templateCache.has(modelKey)) {
+      templateCache.set(modelKey, await loadCharacterTemplate(modelKey));
+    }
+    return templateCache.get(modelKey);
+  }
+
+  function makeActorMesh(template, desiredHeight) {
+    const placement = new THREE.Group();
+    placement.userData = { isCharacter: true };
+    if (template) {
+      const model = template.root.clone(true);
+      const scale = desiredHeight / template.rawHeight;
+      model.scale.set(scale, scale, scale);
+      model.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(model);
+      model.position.y = -box.min.y;
+      placement.add(model);
     } else {
-      const left = project(c, basis, angles, w, h, it.x - it.w / 2, it.y, it.z);
-      const rightp = project(c, basis, angles, w, h, it.x + it.w / 2, it.y, it.z);
-      if (!left || !rightp) return;
-      const pw = Math.abs(rightp.x - left.x);
-      const ph = base.y - top.y;
-      ctx.strokeStyle = "rgba(0,0,0,0.4)"; ctx.fillStyle = it.color;
-      ctx.fillRect(base.x - pw / 2, top.y, pw, ph); ctx.strokeRect(base.x - pw / 2, top.y, pw, ph);
-      ctx.fillStyle = "#222"; ctx.font = "9px monospace"; ctx.textAlign = "center"; ctx.fillText(it.label, base.x, base.y + 11);
+      const geo = new THREE.BoxGeometry(0.6, desiredHeight, 0.4);
+      const mat = new THREE.MeshStandardMaterial({ color: 0x8888ff });
+      const box = new THREE.Mesh(geo, mat);
+      box.castShadow = true;
+      box.receiveShadow = true;
+      box.position.y = desiredHeight / 2;
+      placement.add(box);
     }
-  });
-
-  document.getElementById('hcam').innerText = active.split(' ')[0];
-  document.getElementById('hlens').innerText = c.lens + "mm";
-  let scaleLbl = "Extreme wide (EWS)";
-  if (closestActor) {
-    const base = project(c, basis, angles, w, h, closestActor.x, closestActor.y, closestActor.z);
-    const top = project(c, basis, angles, w, h, closestActor.x, closestActor.y, closestActor.z + closestActor.h);
-    if (base && top) {
-      const headFrac = (base.y - top.y) / h;
-      if (headFrac > 1.2) scaleLbl = "Extreme close-up (ECU)";
-      else if (headFrac > 0.8) scaleLbl = "Close-up (CU)";
-      else if (headFrac > 0.4) scaleLbl = "Medium (MS)";
-      else if (headFrac > 0.15) scaleLbl = "Medium wide (MWS)";
-    }
+    return placement;
   }
-  document.getElementById('hscale').innerText = "Closest actor: " + scaleLbl;
+
+  await Promise.all(
+    [...new Set(state.items.filter(i => i.type === 'actor').map(i => i.modelKey || 'brian'))]
+      .map(getTemplate)
+  );
+
+  const actorMeshes = new Map();
+  const propMeshes = new Map();
+
+  function syncItems() {
+    const liveIds = new Set(state.items.map(i => i.id));
+    actorMeshes.forEach((mesh, id) => {
+      if (!liveIds.has(id)) { scene.remove(mesh); actorMeshes.delete(id); }
+    });
+    propMeshes.forEach((mesh, id) => {
+      if (!liveIds.has(id)) { scene.remove(mesh); propMeshes.delete(id); }
+    });
+
+    state.items.forEach(it => {
+      if (it.type === 'actor') {
+        let actorGroup = actorMeshes.get(it.id);
+        if (!actorGroup) {
+          const modelKey = it.modelKey || 'brian';
+          // 👈 MODEL-SPECIFIC DEFAULT HEIGHT: Elizabeth = 1.7m, Brian = 1.8m
+          const defaultHeight = (modelKey === 'elizabeth') ? 1.7 : 1.8;
+          const desiredHeight = it.h || defaultHeight;
+          const template = templateCache.get(modelKey) || null;
+          actorGroup = makeActorMesh(template, desiredHeight);
+          actorGroup.userData.actorId = it.id;
+          scene.add(actorGroup);
+          actorMeshes.set(it.id, actorGroup);
+          if (!templateCache.has(modelKey)) {
+            getTemplate(modelKey).then(tmpl => {
+              const stillPresent = actorMeshes.get(it.id) === actorGroup;
+              if (tmpl && stillPresent) {
+                const rebuilt = makeActorMesh(tmpl, desiredHeight);
+                rebuilt.userData.actorId = it.id;
+                rebuilt.position.copy(actorGroup.position);
+                rebuilt.rotation.copy(actorGroup.rotation);
+                scene.remove(actorGroup);
+                scene.add(rebuilt);
+                actorMeshes.set(it.id, rebuilt);
+              }
+            });
+          }
+        }
+        actorGroup.position.copy(worldToThree(it.x, it.y, 0));
+        const facingRad = it.facing * state.D2R;
+        actorGroup.rotation.y = -facingRad - Math.PI / 2;
+        actorGroup.updateMatrixWorld(true);
+      } else {
+        let m = propMeshes.get(it.id);
+        if (!m) {
+          const geo = new THREE.BoxGeometry(it.w, it.h, it.w * 0.7);
+          const mat = new THREE.MeshStandardMaterial({ color: it.color, roughness: 0.7 });
+          m = new THREE.Mesh(geo, mat);
+          m.castShadow = true;
+          m.receiveShadow = true;
+          scene.add(m);
+          propMeshes.set(it.id, m);
+        }
+        m.position.copy(worldToThree(it.x, it.y, it.h / 2));
+      }
+    });
+  }
+
+  function resize() {
+    const rect = canvas3d.getBoundingClientRect();
+    if (rect.width < 1 || rect.height < 1) return;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(rect.width, rect.height, false);
+    camera.aspect = rect.width / rect.height;
+    camera.updateProjectionMatrix();
+  }
+  window.addEventListener('resize', resize);
+
+  // ---- Compact HUD update (no toggle) ----
+  function updateHUD(cam) {
+    const hcam = document.getElementById('hcam');
+    const hlens = document.getElementById('hlens');
+    const hExtra = document.getElementById('hExtra');
+    if (!hExtra) return;
+
+    const camHeight = cam.z;
+    const focalLength = cam.lens;
+
+    // Get all actors, sorted by distance
+    const actors = [];
+    state.items.forEach(it => {
+      if (it.type !== 'actor') return;
+      const dx = cam.x - it.x, dy = cam.y - it.y, dz = cam.z - it.z;
+      const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+      actors.push({ label: it.label, dist: dist });
+    });
+    actors.sort((a,b) => a.dist - b.dist);
+
+    let actorList = actors.map(a => `${a.label} (${a.dist.toFixed(1)}m)`).join(', ');
+    if (actorList.length === 0) actorList = 'none';
+
+    // Update HUD elements
+    hcam.innerText = state.active;
+    hlens.innerText = `Height: ${camHeight.toFixed(2)}m | Focal: ${focalLength}mm`;
+    hExtra.innerHTML = `Actors: ${actorList}`;
+  }
+
+  // ---- Main render loop ----
+  window.Previz3DRender = function () {
+    try {
+      resize();
+      const cam = state.CAMS[state.active];
+      const angles = state.fov(cam.lens);
+      camera.fov = angles.v * 180 / Math.PI;
+      camera.updateProjectionMatrix();
+      camera.position.copy(worldToThree(cam.x, cam.y, cam.z));
+      camera.lookAt(worldToThree(cam.aimX, cam.aimY, cam.aimZ));
+      syncItems();
+      if (!renderer.getContext().isContextLost()) {
+        renderer.render(scene, camera);
+      }
+      updateHUD(cam);
+    } catch (err) {
+      console.error('Render error:', err);
+    }
+  };
+
+  let use3dActive = true;
+  function frameLoop() {
+    if (use3dActive && window.Previz3DRender) {
+      window.Previz3DRender();
+    }
+    requestAnimationFrame(frameLoop);
+  }
+
+  const toggleChangeHandler = () => {
+    use3dActive = toggle.checked;
+    canvas2d.style.display = use3dActive ? 'none' : 'block';
+    canvas3d.style.display = use3dActive ? 'block' : 'none';
+    if (use3dActive) window.Previz3DRender();
+  };
+  toggle.onchange = toggleChangeHandler;
+  toggle.disabled = false;
+  toggle.checked = true;
+  canvas2d.style.display = 'none';
+  canvas3d.style.display = 'block';
+
+  syncItems();
+  requestAnimationFrame(frameLoop);
 }
 
-// ---------- Floor plan interaction ----------
-const fpCanvas = document.getElementById('fp');
-
-fpCanvas.addEventListener('mousedown', e => {
-  const r = fpCanvas.getBoundingClientRect();
-  const mx = e.clientX - r.left, my = e.clientY - r.top;
-  if (!window._fpT) return;
-  const { toPx, fromPx } = window._fpT;
-
-  // 1. Check if click is on the aim marker (larger hit area)
-  if (window._aimPx && Math.hypot(mx - window._aimPx.x, my - window._aimPx.y) < 20) {
-    draggingAim = true;
-    return;
-  }
-
-  // 2. Check if click is on a camera
-  for (const [k, c] of Object.entries(CAMS)) {
-    const p = toPx(c.x, c.y);
-    if (Math.hypot(mx - p.x, my - p.y) < 15) {
-      active = k;
-      sel.value = k;
-      syncControls();
-      render();
-      return;
-    }
-  }
-
-  // 3. Otherwise, try dragging items or panning
-  const wc = fromPx(mx, my);
-  for (const it of items) {
-    if (Math.hypot(it.x - wc.x, it.y - wc.y) < 0.8) {
-      dragging = it;
-      if (it.type === "actor") { activeActor = it.id; syncActorSel(); }
-      render();
-      return;
-    }
-  }
-  panning = true;
-  panStart = { mx, my, panX: viewPanX, panY: viewPanY };
-});
-
-fpCanvas.addEventListener('mousemove', e => {
-  const r = fpCanvas.getBoundingClientRect();
-  const mx = e.clientX - r.left, my = e.clientY - r.top;
-  if (draggingAim) {
-    const wc = window._fpT.fromPx(mx, my);
-    CAMS[active].aimX = wc.x; CAMS[active].aimY = wc.y; CAMS[active].aim = "Custom"; aimSel.value = "Custom";
-    render(); return;
-  }
-  if (dragging) {
-    const wc = window._fpT.fromPx(mx, my);
-    dragging.x = wc.x; dragging.y = wc.y;
-    if (dragging.type === "actor") dragging.standAt = null;
-    render(); return;
-  }
-  if (panning) {
-    viewPanX = panStart.panX + (mx - panStart.mx);
-    viewPanY = panStart.panY + (my - panStart.my);
-    render();
-  }
-});
-window.addEventListener('mouseup', () => { dragging = null; draggingAim = false; panning = false; render(); });
-fpCanvas.addEventListener('wheel', e => {
-  e.preventDefault();
-  viewZoom = Math.min(4, Math.max(0.4, viewZoom * (e.deltaY < 0 ? 1.1 : 0.9)));
-  render();
-}, { passive: false });
-
-// ---------- Initialise ----------
-syncActorSel(); syncControls(); render();
-window.addEventListener('resize', render);
-
-// ---------- State for 3D ----------
-window.PrevizState = {
-  CAMS, items, V, VIGNETTE_ORDER, D2R, pt, fov,
-  get active() { return active; },
-  // ---- Recess geometry exports for 3D ----
-  R_AUDIENCE: R_AUDIENCE,
-  R_WALL: R_WALL,
-  R_BACK: R_BACK,
-  WALKWAY_WIDTH_M: WALKWAY_WIDTH_M,
-  VIGNETTE_DEPTH_M: VIGNETTE_DEPTH_M,
-  VIGNETTE_LOWER_H: VIGNETTE_LOWER_H,
-  VIGNETTE_UPPER_H: VIGNETTE_UPPER_H,
-  VIGNETTE_TOTAL_H: VIGNETTE_TOTAL_H,
-  VIGNETTE_BOUNDS: VIGNETTE_BOUNDS,
-  VIGNETTE_FOOTPRINTS: VIGNETTE_FOOTPRINTS,
-  VIGNETTE_COLORS: VIGNETTE_COLORS,
-  ROOM_CENTER: ROOM_CENTER,
-  leftWalkwayLeft: -6.401,
-  leftWalkwayRight: -4.572,
-  rightWalkwayLeft: 4.572,
-  rightWalkwayRight: 6.401,
-  cutY: -7.32,   // frontY - 3.66
-  seatWidth: 0.45,
-  seatDepth: 0.6,
-  audienceFloorZ: -1.14  // -3'9"
-};
-window.dispatchEvent(new Event('previz-ready'));
+if (window.PrevizState) {
+  init3D();
+} else {
+  window.addEventListener('previz-ready', init3D);
+}
